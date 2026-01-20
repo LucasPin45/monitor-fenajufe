@@ -143,6 +143,30 @@ SITUACOES_TRAMITACAO_ATIVA = [
     "pronta para deliberação"
 ]
 
+# Situações FORA de tramitação (excluir do monitoramento)
+SITUACOES_FORA_TRAMITACAO = [
+    "arquivada",
+    "arquivado",
+    "transformada em norma jurídica",
+    "transformado em norma jurídica",
+    "transformada em lei",
+    "perdeu a eficácia",
+    "perda de eficácia",
+    "retirada pelo autor",
+    "retirado pelo autor",
+    "prejudicada",
+    "prejudicado",
+    "devolvida ao autor",
+    "devolvido ao autor",
+    "vetado totalmente",
+    "declarada prejudicada",
+    "declarado prejudicado",
+    "rejeitada",
+    "rejeitado",
+    "não apreciada",
+    "não apreciado",
+]
+
 # Classificação de impacto por tipo de proposição
 PESO_TIPO_PROPOSICAO = {
     "PEC": 5,   # Emenda Constitucional - maior impacto
@@ -304,6 +328,12 @@ class MatchingEngine:
         for palavra_exc in self.palavras_exclusao:
             if palavra_exc in texto_analise:
                 return None  # Excluído
+        
+        # Verificar se está FORA de tramitação (arquivada, transformada em lei, etc.)
+        situacao = normalize_text(proposicao.get("statusProposicao", {}).get("descricaoSituacao", ""))
+        for sit_fora in SITUACOES_FORA_TRAMITACAO:
+            if sit_fora in situacao:
+                return None  # Fora de tramitação - excluir
         
         # Calcular matches de palavras-chave principais
         palavras_match = []
@@ -467,6 +497,7 @@ def buscar_eventos_periodo(
 ) -> List[Dict]:
     """
     Busca eventos (reuniões de comissão, plenário) em um período.
+    A API da Câmara geralmente só retorna eventos futuros ou muito recentes.
     """
     todos_eventos = []
     
@@ -487,17 +518,49 @@ def buscar_eventos_periodo(
             eventos = data.get("dados", [])
             
             # Filtrar por órgãos se especificado
-            if orgaos:
+            if orgaos and eventos:
                 orgaos_upper = [o.upper() for o in orgaos]
-                eventos = [
-                    e for e in eventos 
-                    if any(org.get("sigla", "").upper() in orgaos_upper 
-                           for org in e.get("orgaos", []))
-                ]
+                # Filtrar eventos que tenham ao menos um órgão da lista
+                eventos_filtrados = []
+                for e in eventos:
+                    orgaos_evento = e.get("orgaos", [])
+                    if not orgaos_evento:  # Se não tem órgão, incluir
+                        eventos_filtrados.append(e)
+                    elif any(org.get("sigla", "").upper() in orgaos_upper for org in orgaos_evento):
+                        eventos_filtrados.append(e)
+                eventos = eventos_filtrados
             
             todos_eventos.extend(eventos)
             
+            # Verificar se há paginação
+            links = data.get("links", [])
+            next_link = next((l for l in links if l.get("rel") == "next"), None)
+            
+            while next_link and len(todos_eventos) < 500:  # Limite de segurança
+                response = requests.get(next_link["href"], timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    novos_eventos = data.get("dados", [])
+                    
+                    # Aplicar filtro de órgãos novamente
+                    if orgaos and novos_eventos:
+                        orgaos_upper = [o.upper() for o in orgaos]
+                        novos_eventos = [
+                            e for e in novos_eventos 
+                            if not e.get("orgaos") or any(
+                                org.get("sigla", "").upper() in orgaos_upper 
+                                for org in e.get("orgaos", [])
+                            )
+                        ]
+                    
+                    todos_eventos.extend(novos_eventos)
+                    links = data.get("links", [])
+                    next_link = next((l for l in links if l.get("rel") == "next"), None)
+                else:
+                    break
+                    
     except Exception as e:
+        st.warning(f"Erro ao buscar eventos: {e}")
         st.warning(f"Erro ao buscar eventos: {e}")
     
     return todos_eventos
@@ -1076,12 +1139,21 @@ def configurar_pagina():
         page_title="Monitor de Interesses | Monitoramento Legislativo",
         page_icon="🏛️",
         layout="wide",
-        initial_sidebar_state="expanded"
+        initial_sidebar_state="collapsed"  # Sidebar começa fechada
     )
     
-    # CSS customizado
+    # CSS customizado - esconder sidebar completamente
     st.markdown("""
     <style>
+    /* Esconder sidebar */
+    [data-testid="stSidebar"] {
+        display: none;
+    }
+    [data-testid="stSidebarNav"] {
+        display: none;
+    }
+    
+    /* Header estilizado */
     .main-header {
         background: linear-gradient(135deg, #1a365d 0%, #2d3748 100%);
         padding: 1.5rem;
@@ -1097,6 +1169,8 @@ def configurar_pagina():
         color: #a0aec0;
         margin: 0.5rem 0 0 0;
     }
+    
+    /* Cards de métricas */
     .metric-card {
         background: white;
         padding: 1rem;
@@ -1104,6 +1178,8 @@ def configurar_pagina():
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
         border-left: 4px solid #1a365d;
     }
+    
+    /* Alertas */
     .alerta-critico {
         background: #fff5f5;
         border-left: 4px solid #c53030;
@@ -1117,6 +1193,12 @@ def configurar_pagina():
         padding: 1rem;
         border-radius: 4px;
         margin: 0.5rem 0;
+    }
+    
+    /* Quebra de texto nas tabelas */
+    div[data-testid="stDataFrame"] * {
+        white-space: normal !important;
+        word-break: break-word !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -1318,62 +1400,6 @@ def render_tabela_materias(df: pd.DataFrame, key_suffix: str = ""):
     
     return sel
 
-def render_sidebar_filtros(config: ConfiguracaoCliente):
-    """Renderiza sidebar com filtros"""
-    with st.sidebar:
-        st.markdown("### ⚙️ Filtros")
-        
-        # Período - reduzido para 7 dias por padrão para performance
-        st.markdown("**Período**")
-        hoje = datetime.date.today()
-        col1, col2 = st.columns(2)
-        with col1:
-            data_inicio = st.date_input("De", hoje - datetime.timedelta(days=7))
-        with col2:
-            data_fim = st.date_input("Até", hoje)
-        
-        # Tipos de proposição
-        st.markdown("**Tipos**")
-        tipos_selecionados = st.multiselect(
-            "Tipos de proposição",
-            options=["PL", "PLP", "PEC", "MPV", "PDL", "PRC", "REQ"],
-            default=["PL", "PLP", "PEC", "MPV"]
-        )
-        
-        # Níveis de alerta
-        st.markdown("**Prioridade**")
-        niveis_selecionados = st.multiselect(
-            "Níveis de alerta",
-            options=["CRITICO", "ALTO", "MEDIO", "BAIXO", "INFO"],
-            default=["CRITICO", "ALTO", "MEDIO"]
-        )
-        
-        # Temas
-        st.markdown("**Temas**")
-        temas_disponiveis = list(config.temas.keys())
-        temas_selecionados = st.multiselect(
-            "Filtrar por tema",
-            options=temas_disponiveis,
-            default=temas_disponiveis[:3] if len(temas_disponiveis) >= 3 else temas_disponiveis
-        )
-        
-        st.markdown("---")
-        
-        # Informações do cliente
-        st.markdown("### 📋 Configuração")
-        st.caption(f"**Cliente:** {config.nome_exibicao}")
-        st.caption(f"**Plano:** {config.plano.title()}")
-        st.caption(f"**Temas configurados:** {len(config.temas)}")
-        st.caption(f"**Palavras-chave:** {len(config.palavras_chave_principais)}")
-        
-        return {
-            "data_inicio": data_inicio,
-            "data_fim": data_fim,
-            "tipos": tipos_selecionados,
-            "niveis": niveis_selecionados,
-            "temas": temas_selecionados
-        }
-
 def main():
     """Função principal da aplicação"""
     configurar_pagina()
@@ -1388,26 +1414,87 @@ def main():
         st.error("Erro ao carregar configuração do cliente.")
         return
     
-    # Cabeçalho
-    render_header(config)
-    
-    # Mostrar usuário logado na sidebar
-    with st.sidebar:
-        st.markdown(f"👤 Logado como: **{st.session_state.get('usuario', 'visitante')}**")
+    # Cabeçalho com logout
+    col_header, col_logout = st.columns([9, 1])
+    with col_header:
+        render_header(config)
+    with col_logout:
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.caption(f"👤 {st.session_state.get('usuario', 'visitante')}")
         if st.button("🚪 Sair", key="logout"):
             st.session_state["autenticado"] = False
             st.session_state.pop("usuario", None)
             st.rerun()
-        st.markdown("---")
     
-    # Sidebar com filtros
-    filtros = render_sidebar_filtros(config)
+    # ============================================================
+    # FILTROS INLINE (sem sidebar)
+    # ============================================================
+    st.markdown("### ⚙️ Filtros de Busca")
+    
+    col_periodo1, col_periodo2, col_tipos, col_niveis = st.columns([1, 1, 2, 2])
+    
+    hoje = datetime.date.today()
+    with col_periodo1:
+        data_inicio = st.date_input("📅 De", hoje - datetime.timedelta(days=7), key="filtro_data_inicio")
+    with col_periodo2:
+        data_fim = st.date_input("📅 Até", hoje, key="filtro_data_fim")
+    with col_tipos:
+        tipos_selecionados = st.multiselect(
+            "📋 Tipos",
+            options=["PL", "PLP", "PEC", "MPV", "PDL", "PRC", "REQ"],
+            default=["PL", "PLP", "PEC", "MPV"],
+            key="filtro_tipos"
+        )
+    with col_niveis:
+        niveis_selecionados = st.multiselect(
+            "🚨 Prioridade",
+            options=["CRITICO", "ALTO", "MEDIO", "BAIXO", "INFO"],
+            default=["CRITICO", "ALTO", "MEDIO"],
+            key="filtro_niveis"
+        )
+    
+    # Segunda linha de filtros
+    col_temas, col_busca, col_btn = st.columns([3, 3, 1])
+    
+    with col_temas:
+        temas_disponiveis = list(config.temas.keys())
+        temas_selecionados = st.multiselect(
+            "🏷️ Temas",
+            options=temas_disponiveis,
+            default=[],
+            key="filtro_temas"
+        )
+    with col_busca:
+        busca_texto = st.text_input(
+            "🔍 Buscar",
+            value="",
+            placeholder="PL 1234/2025 ou palavra-chave...",
+            key="filtro_busca"
+        )
+    with col_btn:
+        st.markdown("<br>", unsafe_allow_html=True)
+        btn_carregar = st.button("▶️ Carregar", type="primary", key="btn_carregar_dados")
+    
+    # Info do cliente
+    st.caption(f"📌 **{config.nome_exibicao}** | Temas: {len(config.temas)} | Palavras-chave: {len(config.palavras_chave_principais)}")
+    
+    st.markdown("---")
+    
+    # Consolidar filtros
+    filtros = {
+        "data_inicio": data_inicio,
+        "data_fim": data_fim,
+        "tipos": tipos_selecionados,
+        "niveis": niveis_selecionados,
+        "temas": temas_selecionados,
+        "busca": busca_texto
+    }
     
     # Criar abas
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 Dashboard",
         "📋 Matérias",
-        "📅 Agenda da Semana",
+        "📅 Agenda",
         "📈 Relatórios",
         "⚙️ Configurações"
     ])
@@ -1419,7 +1506,7 @@ def main():
         st.markdown("### Visão Geral do Monitoramento")
         
         # Botão limpar cache
-        col_cache, col_space = st.columns([1, 4])
+        col_cache, col_info = st.columns([1, 4])
         with col_cache:
             if st.button("🧹 Limpar cache", key="limpar_cache_tab1"):
                 fetch_proposicao_detalhes.cache_clear()
@@ -1429,79 +1516,88 @@ def main():
                 st.session_state.pop("props_dict", None)
                 st.session_state.pop("matches", None)
                 st.session_state.pop("status_map", None)
-                st.success("✅ Cache limpo! Recarregando...")
+                st.success("✅ Cache limpo!")
                 st.rerun()
+        with col_info:
+            st.info("💡 Matérias arquivadas, transformadas em lei, com perda de eficácia ou retiradas são automaticamente excluídas.")
         
-        # Buscar dados
-        with st.spinner("Carregando proposições..."):
-            proposicoes = buscar_proposicoes_periodo(
-                filtros["data_inicio"],
-                filtros["data_fim"],
-                filtros["tipos"]
-            )
-            
-            if proposicoes:
-                st.caption(f"📋 {len(proposicoes)} proposições encontradas no período")
+        # Carregar dados automaticamente ou quando clicar no botão
+        if btn_carregar or 'df_matches' not in st.session_state:
+            with st.spinner("Carregando proposições..."):
+                proposicoes = buscar_proposicoes_periodo(
+                    filtros["data_inicio"],
+                    filtros["data_fim"],
+                    filtros["tipos"]
+                )
                 
-                # Processar matches
-                with st.spinner("Aplicando filtros de interesse..."):
-                    matches = processar_proposicoes_para_cliente(proposicoes, config)
+                if proposicoes:
+                    st.caption(f"📋 {len(proposicoes)} proposições encontradas no período")
+                    
+                    # Processar matches
+                    with st.spinner("Aplicando filtros de interesse..."):
+                        matches = processar_proposicoes_para_cliente(proposicoes, config)
+                    
+                    st.caption(f"✅ {len(matches)} proposições relevantes em tramitação")
+                    
+                    # Criar dicionário de proposições para referência
+                    props_dict = {str(p.get("id", "")): p for p in proposicoes}
+                    
+                    # Buscar status atualizado
+                    with st.spinner("Carregando status atualizado..."):
+                        ids_matches = [m.proposicao_id for m in matches]
+                        status_map = build_status_map(ids_matches)
+                    
+                    # Criar DataFrame
+                    df_matches = criar_dataframe_matches(matches, props_dict, status_map)
+                    
+                    # Aplicar filtros adicionais
+                    if filtros["niveis"]:
+                        df_matches = df_matches[df_matches['Nível Alerta'].isin(filtros["niveis"])]
+                    
+                    if filtros["temas"]:
+                        mask = df_matches['Temas Match'].apply(
+                            lambda x: any(t in x for t in filtros["temas"]) if x else False
+                        )
+                        df_matches = df_matches[mask]
+                    
+                    # Filtro de busca
+                    if filtros["busca"].strip():
+                        busca_lower = filtros["busca"].lower()
+                        mask = df_matches.apply(lambda row: busca_lower in str(row).lower(), axis=1)
+                        df_matches = df_matches[mask]
+                    
+                    # Armazenar no session state
+                    st.session_state['df_matches'] = df_matches
+                    st.session_state['props_dict'] = props_dict
+                    st.session_state['matches'] = matches
+                    st.session_state['status_map'] = status_map
+                    
+                    # Métricas resumo
+                    render_metricas_resumo(df_matches)
+                    
+                    st.markdown("---")
+                    
+                    # Alertas críticos (baseado em dias parado)
+                    if 'Parado (dias)' in df_matches.columns:
+                        df_urgentes = df_matches[df_matches['Parado (dias)'].fillna(999) <= 5].head(5)
+                        if not df_urgentes.empty:
+                            st.markdown("### 🚨 Movimentação Recente (≤5 dias)")
+                            for _, row in df_urgentes.iterrows():
+                                emoji = row.get('Alerta', '')
+                                st.markdown(f"""
+                                **{emoji} {row['Proposição']}** - {row.get('Situação atual', '')}
+                                - Órgão: {row.get('Órgão (sigla)', '')} | Parado: {row.get('Parado (dias)', 'N/A')} dias
+                                - Temas: {row.get('Temas Match', '')}
+                                """)
+                    
+                    # Gráfico de distribuição
+                    st.markdown("### 📊 Distribuição por Nível de Alerta")
+                    if 'Nível Alerta' in df_matches.columns:
+                        dist = df_matches['Nível Alerta'].value_counts()
+                        st.bar_chart(dist)
                 
-                st.caption(f"✅ {len(matches)} proposições relevantes identificadas")
-                
-                # Criar dicionário de proposições para referência
-                props_dict = {str(p.get("id", "")): p for p in proposicoes}
-                
-                # Buscar status atualizado das proposições com match
-                with st.spinner("Carregando status atualizado..."):
-                    ids_matches = [m.proposicao_id for m in matches]
-                    status_map = build_status_map(ids_matches)
-                
-                # Criar DataFrame
-                df_matches = criar_dataframe_matches(matches, props_dict, status_map)
-                
-                # Aplicar filtros adicionais
-                if filtros["niveis"]:
-                    df_matches = df_matches[df_matches['Nível Alerta'].isin(filtros["niveis"])]
-                
-                if filtros["temas"]:
-                    mask = df_matches['Temas Match'].apply(
-                        lambda x: any(t in x for t in filtros["temas"]) if x else False
-                    )
-                    df_matches = df_matches[mask]
-                
-                # Armazenar no session state
-                st.session_state['df_matches'] = df_matches
-                st.session_state['props_dict'] = props_dict
-                st.session_state['matches'] = matches
-                st.session_state['status_map'] = status_map
-                
-                # Métricas resumo
-                render_metricas_resumo(df_matches)
-                
-                st.markdown("---")
-                
-                # Alertas críticos (baseado em dias parado)
-                if 'Parado (dias)' in df_matches.columns:
-                    df_urgentes = df_matches[df_matches['Parado (dias)'].fillna(999) <= 5].head(5)
-                    if not df_urgentes.empty:
-                        st.markdown("### 🚨 Movimentação Recente (≤5 dias)")
-                        for _, row in df_urgentes.iterrows():
-                            emoji = row.get('Alerta', '')
-                            st.markdown(f"""
-                            **{emoji} {row['Proposição']}** - {row.get('Situação atual', '')}
-                            - Órgão: {row.get('Órgão (sigla)', '')} | Parado: {row.get('Parado (dias)', 'N/A')} dias
-                            - Temas: {row.get('Temas Match', '')}
-                            """)
-                
-                # Gráfico de distribuição
-                st.markdown("### 📊 Distribuição por Nível de Alerta")
-                if 'Nível Alerta' in df_matches.columns:
-                    dist = df_matches['Nível Alerta'].value_counts()
-                    st.bar_chart(dist)
-                
-            else:
-                st.info("Nenhuma proposição encontrada no período selecionado.")
+                else:
+                    st.info("Nenhuma proposição encontrada no período selecionado.")
     
     # ============================================================
     # ABA 2: MATÉRIAS
