@@ -1136,13 +1136,13 @@ def gerar_agenda_semanal(
 def configurar_pagina():
     """Configura a página Streamlit"""
     st.set_page_config(
-        page_title="Monitor de Interesses | Monitoramento Legislativo",
-        page_icon="🏛️",
+        page_title="Monitor FENAJUFE | Monitoramento Legislativo",
+        page_icon="⚖️",
         layout="wide",
         initial_sidebar_state="collapsed"  # Sidebar começa fechada
     )
     
-    # CSS customizado - esconder sidebar completamente
+    # CSS customizado - Cores FENAJUFE (vermelho e azul escuro)
     st.markdown("""
     <style>
     /* Esconder sidebar */
@@ -1153,36 +1153,69 @@ def configurar_pagina():
         display: none;
     }
     
-    /* Header estilizado */
+    /* Header FENAJUFE */
     .main-header {
-        background: linear-gradient(135deg, #1a365d 0%, #2d3748 100%);
+        background: linear-gradient(135deg, #8B0000 0%, #1a1a2e 100%);
         padding: 1.5rem;
         border-radius: 10px;
         margin-bottom: 1rem;
+        display: flex;
+        align-items: center;
+        gap: 20px;
+    }
+    .main-header img {
+        max-height: 60px;
+        background: white;
+        padding: 8px 12px;
+        border-radius: 8px;
     }
     .main-header h1 {
         color: white;
         margin: 0;
-        font-size: 2rem;
+        font-size: 1.8rem;
     }
     .main-header p {
-        color: #a0aec0;
-        margin: 0.5rem 0 0 0;
+        color: #e0e0e0;
+        margin: 0.3rem 0 0 0;
+        font-size: 0.9rem;
     }
     
-    /* Cards de métricas */
+    /* Cards de métricas - cor FENAJUFE */
     .metric-card {
         background: white;
         padding: 1rem;
         border-radius: 8px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        border-left: 4px solid #1a365d;
+        border-left: 4px solid #8B0000;
+    }
+    
+    /* Botões primários */
+    .stButton > button[kind="primary"] {
+        background-color: #8B0000 !important;
+        border-color: #8B0000 !important;
+    }
+    .stButton > button[kind="primary"]:hover {
+        background-color: #a00000 !important;
+        border-color: #a00000 !important;
+    }
+    
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+    }
+    .stTabs [data-baseweb="tab"] {
+        background-color: #f0f0f0;
+        border-radius: 4px 4px 0 0;
+    }
+    .stTabs [aria-selected="true"] {
+        background-color: #8B0000 !important;
+        color: white !important;
     }
     
     /* Alertas */
     .alerta-critico {
         background: #fff5f5;
-        border-left: 4px solid #c53030;
+        border-left: 4px solid #8B0000;
         padding: 1rem;
         border-radius: 4px;
         margin: 0.5rem 0;
@@ -1195,10 +1228,28 @@ def configurar_pagina():
         margin: 0.5rem 0;
     }
     
+    /* Multiselect tags */
+    .stMultiSelect [data-baseweb="tag"] {
+        background-color: #8B0000 !important;
+    }
+    
     /* Quebra de texto nas tabelas */
     div[data-testid="stDataFrame"] * {
         white-space: normal !important;
         word-break: break-word !important;
+    }
+    
+    /* Info boxes */
+    .stAlert {
+        border-radius: 8px;
+    }
+    
+    /* Links */
+    a {
+        color: #8B0000 !important;
+    }
+    a:hover {
+        color: #a00000 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -1302,12 +1353,19 @@ def verificar_autenticacao() -> bool:
         st.session_state["usuario"] = "visitante"
         return True
     
-    # Mostrar tela de login
-    st.markdown("""
-    <div style="max-width: 400px; margin: 100px auto; padding: 2rem; 
-                background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        <h2 style="text-align: center; color: #1a365d;">🏛️ Monitor de Interesses</h2>
-        <p style="text-align: center; color: #666;">Faça login para acessar</p>
+    # Logo FENAJUFE
+    logo_url = "https://www.fenajufe.org.br/wp-content/uploads/2025/01/Logo-300x84-1.png"
+    
+    # Mostrar tela de login com identidade FENAJUFE
+    st.markdown(f"""
+    <div style="max-width: 420px; margin: 80px auto; padding: 2rem; 
+                background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                border-top: 4px solid #8B0000;">
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+            <img src="{logo_url}" alt="FENAJUFE" style="max-width: 200px; margin-bottom: 1rem;">
+            <h2 style="color: #8B0000; margin: 0;">Monitor Legislativo</h2>
+            <p style="color: #666; margin-top: 0.5rem;">Faça login para acessar o sistema</p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1333,11 +1391,17 @@ def verificar_autenticacao() -> bool:
 # ============================================================
 
 def render_header(config: ConfiguracaoCliente):
-    """Renderiza cabeçalho da aplicação"""
+    """Renderiza cabeçalho da aplicação com logo FENAJUFE"""
+    # URL da logo FENAJUFE
+    logo_url = "https://www.fenajufe.org.br/wp-content/uploads/2025/01/Logo-300x84-1.png"
+    
     st.markdown(f"""
     <div class="main-header">
-        <h1>🏛️ Monitor de Interesses</h1>
-        <p>{config.nome_exibicao} | Monitoramento Legislativo Automatizado</p>
+        <img src="{logo_url}" alt="FENAJUFE" onerror="this.style.display='none'">
+        <div>
+            <h1>⚖️ Monitor Legislativo</h1>
+            <p>Monitoramento Legislativo Automatizado | {config.nome_exibicao}</p>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
