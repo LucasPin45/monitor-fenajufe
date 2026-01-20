@@ -420,11 +420,13 @@ def buscar_proposicoes_periodo(
     data_inicio: datetime.date,
     data_fim: datetime.date,
     tipos: List[str] = None,
-    situacao_id: int = None
+    situacao_id: int = None,
+    limite_por_tipo: int = 50
 ) -> List[Dict]:
     """
     Busca proposições apresentadas em um período.
     Retorna lista de proposições com dados básicos.
+    Limitado para performance.
     """
     if tipos is None:
         tipos = ["PL", "PLP", "PEC", "MPV", "PDL"]
@@ -439,7 +441,7 @@ def buscar_proposicoes_periodo(
                 "dataFim": data_fim.strftime("%Y-%m-%d"),
                 "ordem": "DESC",
                 "ordenarPor": "id",
-                "itens": 100
+                "itens": min(limite_por_tipo, 100)  # Limitar para performance
             }
             
             if situacao_id:
@@ -451,21 +453,7 @@ def buscar_proposicoes_periodo(
             if response.status_code == 200:
                 data = response.json()
                 proposicoes = data.get("dados", [])
-                todas_proposicoes.extend(proposicoes)
-                
-                # Verificar se há mais páginas
-                links = data.get("links", [])
-                next_link = next((l for l in links if l.get("rel") == "next"), None)
-                
-                while next_link:
-                    response = requests.get(next_link["href"], timeout=30)
-                    if response.status_code == 200:
-                        data = response.json()
-                        todas_proposicoes.extend(data.get("dados", []))
-                        links = data.get("links", [])
-                        next_link = next((l for l in links if l.get("rel") == "next"), None)
-                    else:
-                        break
+                todas_proposicoes.extend(proposicoes[:limite_por_tipo])
                         
         except Exception as e:
             st.warning(f"Erro ao buscar {tipo}: {e}")
@@ -1136,17 +1124,66 @@ def configurar_pagina():
 def carregar_configuracao_cliente() -> Optional[ConfiguracaoCliente]:
     """Carrega configuração do cliente a partir dos secrets do Streamlit"""
     try:
+        # Ler seção cliente
         cliente_config = st.secrets.get("cliente", {})
+        
+        # Processar temas - converter de {nome, palavras, peso} para {tema: [palavras]}
+        temas_processados = {}
+        temas_raw = cliente_config.get("temas", {})
+        
+        # Se temas_raw é um objeto AttrDict do Streamlit, converter para dict
+        if hasattr(temas_raw, 'to_dict'):
+            temas_raw = temas_raw.to_dict()
+        
+        for tema_key, tema_data in temas_raw.items():
+            if isinstance(tema_data, dict):
+                # Formato: {nome: "...", palavras: [...], peso: N}
+                palavras = tema_data.get("palavras", [])
+                if hasattr(palavras, 'to_list'):
+                    palavras = list(palavras)
+                temas_processados[tema_key] = list(palavras)
+            elif isinstance(tema_data, (list, tuple)):
+                # Formato direto: [palavras]
+                temas_processados[tema_key] = list(tema_data)
+        
+        # Se não encontrou temas, usar template
+        if not temas_processados:
+            temas_processados = TEMAS_TEMPLATE
+        
+        # Processar exclusões
+        exclusoes = cliente_config.get("exclusoes", [])
+        if hasattr(exclusoes, 'to_list'):
+            exclusoes = list(exclusoes)
+        
+        # Processar comissões
+        comissoes_config = cliente_config.get("comissoes", {})
+        if hasattr(comissoes_config, 'to_dict'):
+            comissoes_config = comissoes_config.to_dict()
+        
+        comissoes = []
+        if isinstance(comissoes_config, dict):
+            comissoes = list(comissoes_config.get("prioritarias", [])) + list(comissoes_config.get("secundarias", []))
+        elif isinstance(comissoes_config, (list, tuple)):
+            comissoes = list(comissoes_config)
+        
+        # Ler Telegram dos secrets separados
+        telegram_config = st.secrets.get("telegram", {})
+        telegram_chat_id = telegram_config.get("chat_id", cliente_config.get("telegram_chat_id"))
+        
+        # Consolidar todas as palavras-chave dos temas como principais
+        todas_palavras = []
+        for palavras in temas_processados.values():
+            todas_palavras.extend(palavras)
         
         return ConfiguracaoCliente(
             id_cliente=cliente_config.get("id", generate_client_hash(cliente_config.get("nome", "default"))),
             nome_cliente=cliente_config.get("nome", "Cliente Demo"),
-            nome_exibicao=cliente_config.get("nome_exibicao", "Cliente Demo"),
-            temas=dict(cliente_config.get("temas", TEMAS_TEMPLATE)),
-            palavras_chave_principais=list(cliente_config.get("palavras_chave", [])),
-            palavras_chave_exclusao=list(cliente_config.get("exclusoes", [])),
-            comissoes_estrategicas=list(cliente_config.get("comissoes", [])),
-            telegram_chat_id=cliente_config.get("telegram_chat_id"),
+            nome_exibicao=cliente_config.get("nome_completo", cliente_config.get("nome", "Cliente Demo")),
+            temas=temas_processados,
+            palavras_chave_principais=todas_palavras,
+            palavras_chave_exclusao=list(exclusoes),
+            comissoes_estrategicas=comissoes,
+            telegram_chat_id=telegram_chat_id,
             emails_notificacao=list(cliente_config.get("emails", [])),
             plano=cliente_config.get("plano", "professional")
         )
@@ -1161,6 +1198,53 @@ def carregar_configuracao_cliente() -> Optional[ConfiguracaoCliente]:
             palavras_chave_principais=["reforma tributária", "medicamento", "energia"],
             comissoes_estrategicas=["CFT", "CSSF", "CME"]
         )
+
+
+def verificar_autenticacao() -> bool:
+    """Sistema de autenticação simples"""
+    # Se já está autenticado, retornar True
+    if st.session_state.get("autenticado", False):
+        return True
+    
+    # Tentar ler credenciais dos secrets
+    try:
+        usuarios = st.secrets.get("auth", {}).get("usuarios", {})
+        if hasattr(usuarios, 'to_dict'):
+            usuarios = usuarios.to_dict()
+    except Exception:
+        usuarios = {}
+    
+    # Se não há usuários configurados, permitir acesso direto
+    if not usuarios:
+        st.session_state["autenticado"] = True
+        st.session_state["usuario"] = "visitante"
+        return True
+    
+    # Mostrar tela de login
+    st.markdown("""
+    <div style="max-width: 400px; margin: 100px auto; padding: 2rem; 
+                background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+        <h2 style="text-align: center; color: #1a365d;">🏛️ Monitor de Interesses</h2>
+        <p style="text-align: center; color: #666;">Faça login para acessar</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        with st.form("login_form"):
+            usuario = st.text_input("👤 Usuário", placeholder="Digite seu usuário")
+            senha = st.text_input("🔑 Senha", type="password", placeholder="Digite sua senha")
+            submit = st.form_submit_button("Entrar", use_container_width=True)
+            
+            if submit:
+                if usuario in usuarios and usuarios[usuario] == senha:
+                    st.session_state["autenticado"] = True
+                    st.session_state["usuario"] = usuario
+                    st.rerun()
+                else:
+                    st.error("❌ Usuário ou senha inválidos")
+    
+    return False
 
 # ============================================================
 # INTERFACE PRINCIPAL
@@ -1239,12 +1323,12 @@ def render_sidebar_filtros(config: ConfiguracaoCliente):
     with st.sidebar:
         st.markdown("### ⚙️ Filtros")
         
-        # Período
+        # Período - reduzido para 7 dias por padrão para performance
         st.markdown("**Período**")
         hoje = datetime.date.today()
         col1, col2 = st.columns(2)
         with col1:
-            data_inicio = st.date_input("De", hoje - datetime.timedelta(days=30))
+            data_inicio = st.date_input("De", hoje - datetime.timedelta(days=7))
         with col2:
             data_fim = st.date_input("Até", hoje)
         
@@ -1270,7 +1354,7 @@ def render_sidebar_filtros(config: ConfiguracaoCliente):
         temas_selecionados = st.multiselect(
             "Filtrar por tema",
             options=temas_disponiveis,
-            default=[]
+            default=temas_disponiveis[:3] if len(temas_disponiveis) >= 3 else temas_disponiveis
         )
         
         st.markdown("---")
@@ -1294,6 +1378,10 @@ def main():
     """Função principal da aplicação"""
     configurar_pagina()
     
+    # Verificar autenticação ANTES de carregar qualquer coisa
+    if not verificar_autenticacao():
+        return
+    
     # Carregar configuração do cliente
     config = carregar_configuracao_cliente()
     if not config:
@@ -1302,6 +1390,15 @@ def main():
     
     # Cabeçalho
     render_header(config)
+    
+    # Mostrar usuário logado na sidebar
+    with st.sidebar:
+        st.markdown(f"👤 Logado como: **{st.session_state.get('usuario', 'visitante')}**")
+        if st.button("🚪 Sair", key="logout"):
+            st.session_state["autenticado"] = False
+            st.session_state.pop("usuario", None)
+            st.rerun()
+        st.markdown("---")
     
     # Sidebar com filtros
     filtros = render_sidebar_filtros(config)
