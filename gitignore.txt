@@ -1,0 +1,36 @@
+# Secrets - NUNCA subir para o GitHub!
+.streamlit/secrets.toml
+secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs/
+*.log
+
+# Cache
+.cache/
+*.db
+*.sqlite
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Arquivos temporários
+*.tmp
+*.temp
