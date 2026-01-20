@@ -1566,6 +1566,45 @@ def main():
             # Tabela com seleção
             sel = render_tabela_materias(df, "_tab2")
             
+            # Mostrar detalhes da proposição selecionada
+            if sel and sel.selection and sel.selection.rows:
+                idx_selecionado = sel.selection.rows[0]
+                if idx_selecionado < len(df):
+                    row_selecionada = df.iloc[idx_selecionado]
+                    
+                    st.markdown("---")
+                    st.markdown("### 📄 Detalhes da Proposição Selecionada")
+                    
+                    col_det1, col_det2 = st.columns(2)
+                    
+                    with col_det1:
+                        st.markdown(f"**Proposição:** {row_selecionada.get('Proposição', 'N/A')}")
+                        st.markdown(f"**Tipo:** {row_selecionada.get('Tipo', 'N/A')}")
+                        st.markdown(f"**Ano:** {row_selecionada.get('Ano', 'N/A')}")
+                        st.markdown(f"**Situação:** {row_selecionada.get('Situação atual', 'N/A')}")
+                        st.markdown(f"**Órgão:** {row_selecionada.get('Órgão (sigla)', 'N/A')}")
+                        st.markdown(f"**Relator(a):** {row_selecionada.get('Relator(a)', 'Aguardando')}")
+                    
+                    with col_det2:
+                        st.markdown(f"**Nível de Alerta:** {row_selecionada.get('Nível Alerta', 'N/A')}")
+                        st.markdown(f"**Score:** {row_selecionada.get('Score', 'N/A')}")
+                        st.markdown(f"**Parado há:** {row_selecionada.get('Parado (dias)', 'N/A')} dias")
+                        st.markdown(f"**Data do Status:** {row_selecionada.get('Data do status', 'N/A')}")
+                        st.markdown(f"**Temas:** {row_selecionada.get('Temas Match', 'N/A')}")
+                        st.markdown(f"**Palavras Match:** {row_selecionada.get('Palavras Match', 'N/A')}")
+                    
+                    st.markdown("**Ementa:**")
+                    st.info(row_selecionada.get('Ementa', 'Sem ementa disponível'))
+                    
+                    st.markdown(f"**Último andamento:** {row_selecionada.get('Último andamento', 'N/A')}")
+                    
+                    st.markdown(f"**Autor(es):** {row_selecionada.get('Autor', 'N/A')}")
+                    
+                    # Link para a Câmara
+                    link = row_selecionada.get('Link', '')
+                    if link:
+                        st.markdown(f"🔗 [Abrir na Câmara dos Deputados]({link})")
+            
             # Downloads
             st.markdown("---")
             col1, col2 = st.columns(2)
@@ -1606,45 +1645,103 @@ def main():
     # ABA 3: AGENDA DA SEMANA
     # ============================================================
     with tab3:
-        st.markdown("### 📅 Agenda Legislativa da Semana")
+        st.markdown("### 📅 Agenda Legislativa")
+        
+        st.info("💡 Busque eventos e pautas de comissões para um período específico. A API da Câmara pode não ter eventos para todas as datas.")
         
         col1, col2 = st.columns(2)
         with col1:
-            semana_inicio = st.date_input(
-                "Início da semana",
-                datetime.date.today() - datetime.timedelta(days=datetime.date.today().weekday())
+            agenda_inicio = st.date_input(
+                "Data inicial",
+                datetime.date.today() - datetime.timedelta(days=7),
+                key="agenda_inicio"
             )
         with col2:
-            semana_fim = semana_inicio + datetime.timedelta(days=6)
-            st.info(f"Fim da semana: {semana_fim}")
+            agenda_fim = st.date_input(
+                "Data final",
+                datetime.date.today() + datetime.timedelta(days=7),
+                key="agenda_fim"
+            )
         
-        if st.button("🔄 Carregar Agenda", type="primary"):
-            with st.spinner("Buscando eventos e pautas..."):
-                agenda = gerar_agenda_semanal(config, semana_inicio, semana_fim)
-                
-                st.success(f"✅ {agenda['total_eventos']} eventos encontrados, {agenda['total_materias_interesse']} matérias de interesse")
-                
-                # Exibir por dia
-                for data, itens in sorted(agenda['agenda_por_dia'].items()):
-                    with st.expander(f"📅 {data} ({len(itens)} itens)", expanded=True):
-                        for item in itens:
-                            prop = item.get('proposicao', {})
-                            match = item.get('match')
-                            
-                            ident = format_sigla_num_ano(
-                                prop.get('siglaTipo', ''),
-                                prop.get('numero', ''),
-                                prop.get('ano', '')
-                            )
-                            
-                            st.markdown(f"""
-                            **🚨 {ident}** - {item.get('evento_hora', '')} - {item.get('orgao', '')}
-                            
-                            *{prop.get('ementa', '')[:200]}...*
-                            
-                            Temas: {', '.join(match.temas_match) if match else 'N/A'}
-                            """)
-                            st.markdown("---")
+        # Validar período
+        if agenda_fim < agenda_inicio:
+            st.error("❌ Data final deve ser maior que data inicial")
+        elif (agenda_fim - agenda_inicio).days > 60:
+            st.warning("⚠️ Período muito longo. Recomendamos no máximo 60 dias.")
+        
+        if st.button("🔄 Buscar Eventos", type="primary", key="btn_agenda"):
+            with st.spinner("Buscando eventos na API da Câmara..."):
+                try:
+                    # Buscar eventos diretamente
+                    eventos = buscar_eventos_periodo(agenda_inicio, agenda_fim, config.comissoes_estrategicas)
+                    
+                    if eventos:
+                        st.success(f"✅ {len(eventos)} eventos encontrados no período")
+                        
+                        # Organizar por data
+                        eventos_por_dia = {}
+                        for evento in eventos:
+                            data_evento = evento.get("dataHoraInicio", "")[:10]
+                            if data_evento:
+                                if data_evento not in eventos_por_dia:
+                                    eventos_por_dia[data_evento] = []
+                                eventos_por_dia[data_evento].append(evento)
+                        
+                        # Exibir por dia
+                        for data, eventos_dia in sorted(eventos_por_dia.items()):
+                            with st.expander(f"📅 {data} ({len(eventos_dia)} eventos)", expanded=True):
+                                for evento in eventos_dia:
+                                    hora = evento.get("dataHoraInicio", "")[11:16] if evento.get("dataHoraInicio") else ""
+                                    orgaos = ", ".join([o.get("sigla", "") for o in evento.get("orgaos", [])])
+                                    descricao = evento.get("descricaoTipo", "") or evento.get("descricao", "")
+                                    local = evento.get("localExterno", "") or evento.get("localCamara", {}).get("nome", "")
+                                    situacao = evento.get("descricaoSituacao", "")
+                                    
+                                    st.markdown(f"""
+                                    **⏰ {hora}** - **{orgaos}**
+                                    
+                                    📋 {descricao}
+                                    
+                                    📍 Local: {local or 'Não informado'}
+                                    
+                                    📊 Situação: {situacao or 'Não informada'}
+                                    """)
+                                    
+                                    # Buscar pauta do evento
+                                    evento_id = str(evento.get("id", ""))
+                                    if evento_id:
+                                        pauta = buscar_pauta_evento(evento_id)
+                                        if pauta:
+                                            st.markdown(f"**📜 Pauta ({len(pauta)} itens):**")
+                                            for item_pauta in pauta[:5]:  # Limitar a 5 itens
+                                                prop_titulo = item_pauta.get("titulo", "")
+                                                prop_ementa = item_pauta.get("ementa", "")[:150]
+                                                st.caption(f"• {prop_titulo}: {prop_ementa}...")
+                                    
+                                    st.markdown("---")
+                    else:
+                        st.warning(f"""
+                        ⚠️ Nenhum evento encontrado no período de {agenda_inicio} a {agenda_fim}.
+                        
+                        **Possíveis motivos:**
+                        - Não há reuniões agendadas neste período
+                        - Período de recesso parlamentar
+                        - Eventos ainda não cadastrados na API
+                        
+                        **Sugestões:**
+                        - Tente um período diferente
+                        - Verifique datas próximas à semana atual
+                        - Para eventos passados, dados podem não estar disponíveis
+                        """)
+                        
+                except Exception as e:
+                    st.error(f"❌ Erro ao buscar eventos: {e}")
+        
+        # Opção de buscar pautas específicas de comissões
+        st.markdown("---")
+        st.markdown("#### 🏛️ Comissões Monitoradas")
+        comissoes_str = ", ".join(config.comissoes_estrategicas) if config.comissoes_estrategicas else "Todas"
+        st.caption(f"Comissões configuradas: **{comissoes_str}**")
     
     # ============================================================
     # ABA 4: RELATÓRIOS
