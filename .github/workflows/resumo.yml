@@ -1,0 +1,45 @@
+name: Resumo do dia - Monitor FENAJUFE
+
+on:
+  schedule:
+    - cron: "30 23 * * 1-5" # 20:30 Brasília (UTC-3) => 23:30 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  resumo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run (resumo)
+        env:
+          MODO_EXECUCAO: resumo
+          CONFIG_TOML_PATH: config_fenajufe.toml
+          LINK_PAINEL: ${{ secrets.LINK_PAINEL }}
+
+          NOTIFICAR_TELEGRAM: "true"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          NOTIFICAR_EMAIL: "true"
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+        run: |
+          python notificar_fenajufe_interesses.py
