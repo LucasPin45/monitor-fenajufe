@@ -2,11 +2,12 @@ name: Bom dia - Monitor FENAJUFE
 
 on:
   schedule:
-    - cron: "0 10 * * 1-5" # 07:00 Brasília (UTC-3) => 10:00 UTC
+    # 07:00 Brasília = 10:00 UTC
+    - cron: "0 10 * * 1-5"  # Seg-Sex às 07:00 Brasília
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   bom_dia:
@@ -38,3 +39,11 @@ jobs:
           NOTIFICAR_EMAIL: "false"
         run: |
           python notificar_fenajufe_interesses.py
+
+      - name: Commit state files (if changed)
+        run: |
+          git config user.name "monitor-fenajufe-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A resumo_dia_fenajufe.json || true
+          git diff --cached --quiet || git commit -m "chore: inicializar resumo do dia (auto)"
+          git push || true
