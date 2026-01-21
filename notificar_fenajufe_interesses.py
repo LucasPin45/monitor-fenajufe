@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-notificar_fenajufe_interesses.py
+notificar_fenajufe_interesses.py v2
 ========================================
 Monitor de Interesses (FENAJUFE) - Notificações automatizadas
-Inspirado na lógica do Monitor Zanatta:
-- Email só recebe: matches encontrados + resumo do dia
-- Telegram recebe tudo (bom dia, sem novidades, matches, resumo)
 
-Uso (via env var):
-  MODO_EXECUCAO=bom_dia | varredura | resumo
+Melhorias v2:
+- Score mínimo para evitar falsos positivos
+- Formato de mensagem melhorado (estilo Monitor Parlamentar)
+- Mais exclusões para evitar lixo (radiodifusão, homenagens, etc.)
+- Horário nas mensagens
+- Filtro de situações fora de tramitação
 """
 
 import os
@@ -32,7 +33,7 @@ import requests
 # =========================
 TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
 API_CAMARA_BASE = "https://dadosabertos.camara.leg.br/api/v2"
-HEADERS = {"User-Agent": "MonitorInteresses-FENAJUFE/1.0"}
+HEADERS = {"User-Agent": "MonitorInteresses-FENAJUFE/2.0"}
 
 # =========================
 # LINKS / CANAIS
@@ -61,9 +62,14 @@ CONFIG_TOML_PATH = os.getenv("CONFIG_TOML_PATH", "config_fenajufe.toml")
 # =========================
 # JANELA DE VARREDURA
 # =========================
-DIAS_BUSCA = int(os.getenv("DIAS_BUSCA", "7"))          # proposições apresentadas nos últimos N dias
+DIAS_BUSCA = int(os.getenv("DIAS_BUSCA", "7"))
 LIMITE_POR_TIPO = int(os.getenv("LIMITE_POR_TIPO", "50"))
 TIPOS_MONITORADOS = os.getenv("TIPOS_MONITORADOS", "PL,PLP,PEC,MPV,PDL").split(",")
+
+# =========================
+# SCORE MÍNIMO PARA NOTIFICAR
+# =========================
+SCORE_MINIMO = int(os.getenv("SCORE_MINIMO", "25"))  # Evita falsos positivos
 
 # =========================
 # ARQUIVOS DE ESTADO
@@ -71,6 +77,37 @@ TIPOS_MONITORADOS = os.getenv("TIPOS_MONITORADOS", "PL,PLP,PEC,MPV,PDL").split("
 ESTADO_FILE = Path(os.getenv("ESTADO_FILE", "estado_fenajufe.json"))
 HISTORICO_FILE = Path(os.getenv("HISTORICO_FILE", "historico_fenajufe.json"))
 RESUMO_DIA_FILE = Path(os.getenv("RESUMO_DIA_FILE", "resumo_dia_fenajufe.json"))
+
+# =========================
+# EXCLUSÕES GLOBAIS (evitar lixo)
+# =========================
+EXCLUSOES_GLOBAIS = [
+    # Radiodifusão e telecomunicações
+    "radiodifusao", "radio difusora", "emissora de radio", "frequencia modulada",
+    "onda media", "radio comunitaria", "televisao", "tv ",
+    # Homenagens e datas comemorativas
+    "denomina", "denominacao", "homenagem", "dia nacional", "dia municipal",
+    "patrono", "patrona", "titulo de cidadao", "medalha", "comenda",
+    # Utilidade pública
+    "utilidade publica", "declara de utilidade",
+    # Nomes de ruas/logradouros
+    "rodovia", "aeroporto", "ponte", "viaduto", "praca",
+]
+
+# =========================
+# SITUAÇÕES FORA DE TRAMITAÇÃO
+# =========================
+SITUACOES_ENCERRADAS = [
+    "arquivada", "arquivado",
+    "transformada em norma", "transformado em norma",
+    "transformada em lei", "transformado em lei",
+    "perdeu a eficacia", "perda de eficacia",
+    "retirada pelo autor", "retirado pelo autor",
+    "prejudicada", "prejudicado",
+    "rejeitada", "rejeitado",
+    "vetado totalmente",
+    "devolvida ao autor", "devolvido ao autor",
+]
 
 # =========================
 # UTIL
@@ -115,14 +152,6 @@ def load_toml(path: str) -> Dict[str, Any]:
         return tomllib.load(f)
 
 def parse_config_fenajufe(toml_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Espera:
-      - cliente.temas.<id>.nome
-      - cliente.temas.<id>.palavras
-      - cliente.temas.<id>.peso
-      - cliente.exclusoes = [...]
-    E também aceita "palavras" e "peso" no topo (se você usar isso).
-    """
     cliente = toml_data.get("cliente", {})
     temas_raw = cliente.get("temas", {}) or {}
 
@@ -135,9 +164,10 @@ def parse_config_fenajufe(toml_data: Dict[str, Any]) -> Dict[str, Any]:
         temas[nome] = [normalize_text(p) for p in palavras]
         tema_pesos[nome] = peso
 
-    exclusoes = [normalize_text(x) for x in (cliente.get("exclusoes", []) or [])]
+    # Exclusões do TOML + globais
+    exclusoes_toml = [normalize_text(x) for x in (cliente.get("exclusoes", []) or [])]
+    exclusoes = list(set(exclusoes_toml + EXCLUSOES_GLOBAIS))
 
-    # fallback opcional (se você tiver "palavras = [...]" no topo)
     palavras_topo = toml_data.get("palavras", []) or []
     peso_topo = int(toml_data.get("peso", 10))
     palavras_principais = [normalize_text(p) for p in palavras_topo]
@@ -204,7 +234,7 @@ def format_sigla_num_ano(sigla: str, numero: Any, ano: Any) -> str:
     return ""
 
 # =========================
-# MATCHING (temas + palavras topo + exclusões)
+# MATCHING (com validações extras)
 # =========================
 def calcular_match(proposicao: Dict[str, Any], cfg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     ementa = normalize_text(proposicao.get("ementa", ""))
@@ -212,46 +242,62 @@ def calcular_match(proposicao: Dict[str, Any], cfg: Dict[str, Any]) -> Optional[
     descricao = normalize_text(proposicao.get("descricaoTipo", ""))
     texto = f"{ementa} {keywords} {descricao}"
 
-    # exclusões
+    # Verificar situação - ignorar encerradas
+    situacao = normalize_text(safe_get(proposicao, ["statusProposicao", "descricaoSituacao"], ""))
+    for sit in SITUACOES_ENCERRADAS:
+        if sit in situacao:
+            return None
+
+    # Exclusões (config + globais)
     for exc in cfg["exclusoes"]:
         if exc and exc in texto:
             return None
 
+    # Match de palavras principais
     palavras_match = []
     for p in cfg["palavras_principais"]:
         if p and p in texto:
             palavras_match.append(p)
 
+    # Match de temas
     temas_match = []
+    palavras_tema_match = []  # Para mostrar quais palavras bateram
     for tema, palavras in cfg["temas"].items():
         for p in palavras:
             if p and p in texto:
                 temas_match.append(tema)
+                palavras_tema_match.append(p)
                 break
 
     if not palavras_match and not temas_match:
         return None
 
-    # score (simples e explicável)
+    # Score ponderado
     score = 0.0
     score += min(len(palavras_match) * float(cfg["peso_topo"]), 40.0)
 
-    # temas ponderados por peso
     for tema in set(temas_match):
         peso = float(cfg["tema_pesos"].get(tema, 10))
-        score += min(peso, 15.0)  # trava para não explodir
+        score += min(peso, 20.0)
+
+    # Bonus por múltiplos temas
+    if len(set(temas_match)) >= 2:
+        score += 15.0
+
+    # Bonus por regime de urgência
+    regime = normalize_text(safe_get(proposicao, ["statusProposicao", "regime"], ""))
+    if "urgencia" in regime:
+        score += 20.0
 
     score = min(score, 100.0)
 
-    # nível (heurística)
-    # - se a situação sugerir pauta/ordem do dia, sobe para CRÍTICO
-    situacao = normalize_text(safe_get(proposicao, ["statusProposicao", "descricaoSituacao"], ""))
-    regime = normalize_text(safe_get(proposicao, ["statusProposicao", "regime"], ""))
-    if any(x in situacao for x in ["ordem do dia", "em pauta", "incluida na ordem do dia", "matéria em votação"]):
+    # Nível de alerta
+    situacao_norm = normalize_text(safe_get(proposicao, ["statusProposicao", "descricaoSituacao"], ""))
+    if any(x in situacao_norm for x in ["ordem do dia", "em pauta", "incluida na ordem", "em votacao"]):
         nivel = "CRITICO"
-    elif "urgencia" in regime or score >= 70:
+    elif "urgencia" in regime or score >= 60:
         nivel = "ALTO"
-    elif score >= 50:
+    elif score >= 40:
         nivel = "MEDIO"
     else:
         nivel = "BAIXO"
@@ -259,15 +305,15 @@ def calcular_match(proposicao: Dict[str, Any], cfg: Dict[str, Any]) -> Optional[
     return {
         "proposicao_id": str(proposicao.get("id", "")),
         "temas_match": sorted(list(set(temas_match))),
-        "palavras_match": sorted(list(set(palavras_match)))[:10],
+        "palavras_match": sorted(list(set(palavras_match + palavras_tema_match)))[:10],
         "score": score,
         "nivel": nivel,
     }
 
 # =========================
-# FORMATAÇÃO (Telegram + Email)
+# FORMATAÇÃO (Telegram - Estilo Monitor Parlamentar)
 # =========================
-def trunc(texto: str, n: int = 220) -> str:
+def trunc(texto: str, n: int = 300) -> str:
     if not texto:
         return ""
     t = str(texto).strip()
@@ -277,50 +323,70 @@ def emoji_nivel(nivel: str) -> str:
     return {"CRITICO": "🚨", "ALTO": "⚠️", "MEDIO": "🔔", "BAIXO": "📋"}.get(nivel, "ℹ️")
 
 def formatar_alerta_match(match: Dict[str, Any], prop: Dict[str, Any], status: Dict[str, str]) -> str:
+    """Formato estilo Monitor Parlamentar Informa"""
     ident = format_sigla_num_ano(prop.get("siglaTipo", ""), prop.get("numero", ""), prop.get("ano", ""))
-    ementa = trunc(prop.get("ementa", ""), 240)
+    ementa = trunc(prop.get("ementa", ""), 350)
     orgao = status.get("siglaOrgao") or safe_get(prop, ["statusProposicao", "siglaOrgao"], "")
     situacao = status.get("situacao") or safe_get(prop, ["statusProposicao", "descricaoSituacao"], "Em tramitação")
     relator = status.get("relator") or safe_get(prop, ["statusProposicao", "nomeRelator"], "")
+    despacho = status.get("despacho") or safe_get(prop, ["statusProposicao", "despacho"], "")
+    
+    hora = now_bsb().strftime("%H:%M")
+    data = now_bsb().strftime("%d/%m/%Y")
 
-    temas_txt = ", ".join(match["temas_match"]) if match["temas_match"] else "Palavras-chave (geral)"
-    palavras_txt = ", ".join(match["palavras_match"]) if match["palavras_match"] else "-"
+    temas_txt = ", ".join(match["temas_match"]) if match["temas_match"] else "Geral"
+    palavras_txt = ", ".join(match["palavras_match"][:5]) if match["palavras_match"] else "-"
 
     link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={match['proposicao_id']}"
 
-    return f"""{emoji_nivel(match["nivel"])} <b>FENAJUFE | {match["nivel"]}</b>
-
-<b>{html.escape(ident)}</b>
+    # Formato inspirado no Monitor Parlamentar
+    msg = f"""<b>🎯 Monitor FENAJUFE Informa</b> | CD | <b>{html.escape(ident)}</b>
 <i>{html.escape(ementa)}</i>
 
-<b>Status:</b> {html.escape(situacao)}
-<b>Órgão:</b> {html.escape(orgao)}
-<b>Relator(a):</b> {html.escape(relator or "—")}
-<b>Temas:</b> {html.escape(temas_txt)}
-<b>Gatilhos:</b> {html.escape(palavras_txt)}
-<b>Relevância:</b> {match["score"]:.0f}/100
+<b>📌 Status:</b> {html.escape(situacao)}
+<b>🏛️ Órgão:</b> {html.escape(orgao)}"""
 
-🔗 <a href="{link}">Ver tramitação</a>
-🖥️ <a href="{LINK_PAINEL}">Abrir painel</a>
-"""
+    if relator:
+        msg += f"\n<b>👤 Relator(a):</b> {html.escape(relator)}"
+
+    if despacho:
+        despacho_curto = trunc(despacho, 150)
+        msg += f"\n<b>📝 Despacho:</b> {html.escape(despacho_curto)}"
+
+    msg += f"""
+
+<b>🏷️ Temas:</b> {html.escape(temas_txt)}
+<b>🔑 Palavras-chave:</b> {html.escape(palavras_txt)}
+<b>📊 Relevância:</b> {match["score"]:.0f}/100
+
+<b>📲 Tramitação:</b> <a href="{link}">Clique aqui</a>
+🖥️ <a href="{LINK_PAINEL}">Abrir Painel</a>
+
+<i>⏰ {hora} - {data}</i>"""
+
+    return msg
 
 def formatar_mensagem_bom_dia() -> str:
     data = now_bsb().strftime("%d/%m/%Y")
+    hora = now_bsb().strftime("%H:%M")
     return f"""☀️ <b>Bom dia! Monitor FENAJUFE</b>
-<i>{data} — Varredura automática ativada.</i>
+<i>{data} às {hora}</i>
 
-• Telegram recebe status e alertas em tempo real
-• Email recebe somente quando houver match + resumo do dia
+Varredura automática ativada para hoje.
+• Telegram: alertas em tempo real
+• Email: matches + resumo do dia
 
 🖥️ <a href="{LINK_PAINEL}">Abrir painel</a>
 """
 
 def formatar_sem_novidades_completa() -> str:
     hora = now_bsb().strftime("%H:%M")
-    return f"""✅ <b>Monitor FENAJUFE</b>
-Sem novos matches nesta varredura ({hora}).
+    data = now_bsb().strftime("%d/%m")
+    return f"""✅ <b>Monitor FENAJUFE</b> | {data} às {hora}
+Nenhuma nova matéria relevante identificada.
 
-Isso é bom: nada novo bateu nos temas/palavras configurados.
+Isso significa que não houve proposições novas nos temas monitorados.
+
 🖥️ <a href="{LINK_PAINEL}">Abrir painel</a>
 """
 
@@ -330,20 +396,22 @@ def formatar_sem_novidades_curta() -> str:
 
 def formatar_resumo_dia(matches_enviados: List[str]) -> str:
     data = now_bsb().strftime("%d/%m/%Y")
+    hora = now_bsb().strftime("%H:%M")
     total = len(matches_enviados)
+    
     if total == 0:
-        corpo = "Nenhum match foi detectado hoje."
+        corpo = "Nenhuma matéria relevante foi identificada hoje nos temas monitorados."
     else:
-        # lista curta
-        itens = "\n".join([f"• {html.escape(x)}" for x in matches_enviados[:12]])
-        extra = f"\n… +{total-12} item(ns)" if total > 12 else ""
-        corpo = f"<b>Matches do dia ({total}):</b>\n{itens}{extra}"
+        itens = "\n".join([f"• {html.escape(x)}" for x in matches_enviados[:15]])
+        extra = f"\n… e mais {total-15} matéria(s)" if total > 15 else ""
+        corpo = f"<b>Matérias identificadas ({total}):</b>\n{itens}{extra}"
 
-    return f"""🌙 <b>Resumo do Dia — FENAJUFE ({data})</b>
+    return f"""🌙 <b>Resumo do Dia — FENAJUFE</b>
+<i>{data} às {hora}</i>
 
 {corpo}
 
-🖥️ <a href="{LINK_PAINEL}">Abrir painel</a>
+🖥️ <a href="{LINK_PAINEL}">Abrir painel completo</a>
 """
 
 # =========================
@@ -355,7 +423,6 @@ def extrair_texto_plano(mensagem_telegram_html: str) -> str:
     return texto
 
 def telegram_para_email_html(mensagem_telegram_html: str, assunto: str) -> str:
-    # Layout simples, inspirado no Zanatta (botão + rodapé)
     return f"""\
 <!doctype html>
 <html>
@@ -369,16 +436,16 @@ def telegram_para_email_html(mensagem_telegram_html: str, assunto: str) -> str:
       <td align="center">
         <table width="640" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e6e9ef;">
           <tr>
-            <td style="background:#1a365d;color:#fff;padding:18px 22px;">
-              <div style="font-size:16px;font-weight:700;">Monitor de Interesses — FENAJUFE</div>
+            <td style="background:#8B0000;color:#fff;padding:18px 22px;">
+              <div style="font-size:16px;font-weight:700;">⚖️ Monitor Legislativo — FENAJUFE</div>
               <div style="font-size:12px;opacity:.9;margin-top:4px;">Notificação automática</div>
             </td>
           </tr>
           <tr>
-            <td style="padding:18px 22px;color:#111;font-size:14px;line-height:1.45;">
+            <td style="padding:18px 22px;color:#111;font-size:14px;line-height:1.5;">
               {mensagem_telegram_html}
               <div style="margin-top:18px;text-align:center;">
-                <a href="{LINK_PAINEL}" style="display:inline-block;background:#2f7d32;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:700;">
+                <a href="{LINK_PAINEL}" style="display:inline-block;background:#8B0000;color:#fff;text-decoration:none;padding:10px 18px;border-radius:8px;font-weight:700;">
                   🖥️ Abrir Painel
                 </a>
               </div>
@@ -386,7 +453,7 @@ def telegram_para_email_html(mensagem_telegram_html: str, assunto: str) -> str:
           </tr>
           <tr>
             <td style="background:#f8f9fb;padding:14px 22px;color:#6b7280;font-size:12px;text-align:center;border-top:1px solid #eef0f4;">
-              Painel: <a href="{LINK_PAINEL}" style="color:#1a365d;text-decoration:none;">{html.escape(LINK_PAINEL)}</a>
+              <a href="{LINK_PAINEL}" style="color:#8B0000;text-decoration:none;">{html.escape(LINK_PAINEL)}</a>
             </td>
           </tr>
         </table>
@@ -494,7 +561,6 @@ def salvar_historico(h):
     save_json(HISTORICO_FILE, h)
 
 def chave_notificacao(proposicao_id: str, datahora_status: str) -> str:
-    # dedupe por proposição + timestamp do status
     return f"{proposicao_id}::{datahora_status or 'sem_data'}"
 
 def carregar_resumo_dia():
@@ -535,16 +601,17 @@ def executar_resumo():
 
 def executar_varredura():
     print("🔍 MODO: VARREDURA")
+    hora = now_bsb().strftime("%H:%M")
+    print(f"⏰ Horário: {hora}")
+    
     estado = carregar_estado()
     historico = carregar_historico()
 
-    # garantir resumo do dia atualizado
     resumo = carregar_resumo_dia()
     hoje = now_bsb().strftime("%Y-%m-%d")
     if resumo.get("data") != hoje:
         inicializar_resumo_dia()
 
-    # carregar config
     toml_data = load_toml(CONFIG_TOML_PATH)
     cfg = parse_config_fenajufe(toml_data)
 
@@ -554,23 +621,32 @@ def executar_varredura():
     data_fim = fim.strftime("%Y-%m-%d")
 
     print(f"📅 Período: {data_inicio} → {data_fim}")
+    print(f"📊 Score mínimo: {SCORE_MINIMO}")
+    
     props = buscar_proposicoes_periodo(data_inicio, data_fim, TIPOS_MONITORADOS)
     print(f"📦 Proposições coletadas: {len(props)}")
 
     novos_alertas = 0
+    descartados_score = 0
 
     for p in props:
         pid = str(p.get("id", ""))
         if not pid:
             continue
 
-        # enriquecer com detalhes (para ter status/ementa completos)
         det = fetch_proposicao_detalhes(pid)
         if det:
             p = det
 
         match = calcular_match(p, cfg)
         if not match:
+            continue
+
+        # FILTRO: Score mínimo para evitar falsos positivos
+        if match["score"] < SCORE_MINIMO:
+            descartados_score += 1
+            sigla = format_sigla_num_ano(p.get("siglaTipo", ""), p.get("numero", ""), p.get("ano", ""))
+            print(f"   ⏭️ Descartado (score {match['score']:.0f} < {SCORE_MINIMO}): {sigla}")
             continue
 
         status = fetch_status_proposicao(pid)
@@ -580,7 +656,6 @@ def executar_varredura():
         if key in historico["notificados"]:
             continue
 
-        # registrar histórico antes de enviar (reduz risco de duplicar em falha parcial)
         historico["notificados"][key] = {
             "ts": now_bsb().isoformat(),
             "proposicao": format_sigla_num_ano(p.get("siglaTipo", ""), p.get("numero", ""), p.get("ano", "")),
@@ -591,17 +666,17 @@ def executar_varredura():
 
         sigla = historico["notificados"][key]["proposicao"] or f"ID {pid}"
         msg = formatar_alerta_match(match, p, status)
-        assunto = f"{emoji_nivel(match['nivel'])} FENAJUFE | Match: {sigla}"
+        assunto = f"{emoji_nivel(match['nivel'])} FENAJUFE | {sigla}"
 
-        # match = Telegram + Email
         notificar_ambos(msg, assunto)
         adicionar_ao_resumo(sigla)
 
         novos_alertas += 1
         time.sleep(1)
 
+    print(f"📉 Descartados por score baixo: {descartados_score}")
+
     if novos_alertas == 0:
-        # sem novidades = APENAS Telegram, alternando completa/curta igual Zanatta
         if estado.get("ultima_novidade", True):
             notificar_telegram_apenas(formatar_sem_novidades_completa())
         else:
@@ -615,14 +690,20 @@ def executar_varredura():
 # =========================
 def main():
     print("=" * 72)
-    print("🤖 MONITOR FENAJUFE — Notificações (Interesses)")
+    print("🤖 MONITOR FENAJUFE v2 — Notificações")
     print("=" * 72)
+
+    hora = now_bsb().strftime("%H:%M")
+    data = now_bsb().strftime("%d/%m/%Y")
+    print(f"⏰ {data} às {hora} (Brasília)")
+    print()
 
     print("📡 CANAIS:")
     print(f"   Telegram: {'ON' if NOTIFICAR_TELEGRAM else 'OFF'}")
     print(f"   Email:    {'ON' if NOTIFICAR_EMAIL else 'OFF'}")
     print(f"🧭 MODO: {MODO_EXECUCAO}")
     print(f"📄 Config: {CONFIG_TOML_PATH}")
+    print(f"📊 Score mínimo: {SCORE_MINIMO}")
     print()
 
     if MODO_EXECUCAO == "bom_dia":
