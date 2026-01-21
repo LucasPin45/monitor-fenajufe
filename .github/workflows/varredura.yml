@@ -2,7 +2,11 @@ name: Varredura - Monitor FENAJUFE
 
 on:
   schedule:
-    - cron: "*/20 10-23 * * 1-5" # a cada 20 min, 07:00-20:59 Brasília (UTC-3)
+    # De 6 em 6 horas (horário de Brasília = UTC-3)
+    # 07:00 BRT = 10:00 UTC
+    # 13:00 BRT = 16:00 UTC
+    # 19:00 BRT = 22:00 UTC
+    - cron: "0 10,16,22 * * 1-5"  # Seg-Sex às 07h, 13h, 19h Brasília
   workflow_dispatch:
 
 permissions:
@@ -34,6 +38,7 @@ jobs:
           DIAS_BUSCA: "7"
           TIPOS_MONITORADOS: "PL,PLP,PEC,MPV,PDL"
           LIMITE_POR_TIPO: "50"
+          SCORE_MINIMO: "25"  # Evita falsos positivos
 
           NOTIFICAR_TELEGRAM: "true"
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -48,7 +53,6 @@ jobs:
         run: |
           python notificar_fenajufe_interesses.py
 
-      # salva estado/histórico/resumo do dia no repo (dedupe e alternância de "sem novidades")
       - name: Commit state files (if changed)
         run: |
           git config user.name "monitor-fenajufe-bot"
