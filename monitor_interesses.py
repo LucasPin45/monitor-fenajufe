@@ -218,6 +218,19 @@ TEMAS_TEMPLATE = {
 # FUNÇÕES UTILITÁRIAS
 # ============================================================
 
+@lru_cache(maxsize=1)
+def carregar_logo_base64() -> Optional[str]:
+    """Carrega a logo da FENAJUFE e converte para base64 (com cache)"""
+    import base64
+    try:
+        logo_url = "https://www.fenajufe.org.br/wp-content/uploads/2025/01/Logo-300x84-1.png"
+        response = requests.get(logo_url, timeout=5, headers={"User-Agent": "MonitorFENAJUFE/1.0"})
+        if response.status_code == 200:
+            return base64.b64encode(response.content).decode()
+    except:
+        pass
+    return None
+
 def get_brasilia_now() -> datetime.datetime:
     """Retorna a data/hora atual no fuso horário de Brasília"""
     return datetime.datetime.now(TZ_BRASILIA)
@@ -1156,18 +1169,9 @@ def configurar_pagina():
     /* Header FENAJUFE */
     .main-header {
         background: linear-gradient(135deg, #8B0000 0%, #1a1a2e 100%);
-        padding: 1.5rem;
+        padding: 1.5rem 2rem;
         border-radius: 10px;
         margin-bottom: 1rem;
-        display: flex;
-        align-items: center;
-        gap: 20px;
-    }
-    .main-header img {
-        max-height: 60px;
-        background: white;
-        padding: 8px 12px;
-        border-radius: 8px;
     }
     .main-header h1 {
         color: white;
@@ -1178,6 +1182,18 @@ def configurar_pagina():
         color: #e0e0e0;
         margin: 0.3rem 0 0 0;
         font-size: 0.9rem;
+    }
+    
+    /* Logo container */
+    .logo-container {
+        background: white;
+        padding: 8px 15px;
+        border-radius: 8px;
+        display: inline-block;
+    }
+    .logo-container img {
+        max-height: 50px;
+        width: auto;
     }
     
     /* Cards de métricas - cor FENAJUFE */
@@ -1353,8 +1369,13 @@ def verificar_autenticacao() -> bool:
         st.session_state["usuario"] = "visitante"
         return True
     
-    # Logo FENAJUFE
-    logo_url = "https://www.fenajufe.org.br/wp-content/uploads/2025/01/Logo-300x84-1.png"
+    # Carregar logo (com cache)
+    logo_base64 = carregar_logo_base64()
+    
+    if logo_base64:
+        logo_html = f'<img src="data:image/png;base64,{logo_base64}" alt="FENAJUFE" style="max-width: 200px; margin-bottom: 1rem;">'
+    else:
+        logo_html = ''
     
     # Mostrar tela de login com identidade FENAJUFE
     st.markdown(f"""
@@ -1362,9 +1383,9 @@ def verificar_autenticacao() -> bool:
                 background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
                 border-top: 4px solid #8B0000;">
         <div style="text-align: center; margin-bottom: 1.5rem;">
-            <img src="{logo_url}" alt="FENAJUFE" style="max-width: 200px; margin-bottom: 1rem;">
-            <h2 style="color: #8B0000; margin: 0;">Monitor Legislativo</h2>
-            <p style="color: #666; margin-top: 0.5rem;">Faça login para acessar o sistema</p>
+            {logo_html}
+            <h2 style="color: #8B0000; margin: 0;">⚖️ Monitor Legislativo</h2>
+            <p style="color: #666; margin-top: 0.5rem;">FENAJUFE - Faça login para acessar</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -1392,15 +1413,28 @@ def verificar_autenticacao() -> bool:
 
 def render_header(config: ConfiguracaoCliente):
     """Renderiza cabeçalho da aplicação com logo FENAJUFE"""
-    # URL da logo FENAJUFE
-    logo_url = "https://www.fenajufe.org.br/wp-content/uploads/2025/01/Logo-300x84-1.png"
+    
+    # Carregar logo (com cache)
+    logo_base64 = carregar_logo_base64()
+    
+    # Construir HTML do header
+    if logo_base64:
+        logo_html = f'<img src="data:image/png;base64,{logo_base64}" alt="FENAJUFE" style="height: 45px; width: auto;">'
+    else:
+        logo_html = '<span style="font-size: 2rem;">⚖️</span>'
     
     st.markdown(f"""
-    <div class="main-header">
-        <img src="{logo_url}" alt="FENAJUFE" onerror="this.style.display='none'">
-        <div>
-            <h1>⚖️ Monitor Legislativo</h1>
-            <p>Monitoramento Legislativo Automatizado | {config.nome_exibicao}</p>
+    <div style="background: linear-gradient(135deg, #8B0000 0%, #1a1a2e 100%); 
+                padding: 1rem 1.5rem; border-radius: 10px; margin-bottom: 1rem;
+                display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+        <div style="background: white; padding: 8px 15px; border-radius: 8px; min-height: 50px; display: flex; align-items: center;">
+            {logo_html}
+        </div>
+        <div style="flex: 1;">
+            <h1 style="color: white; margin: 0; font-size: 1.6rem;">Monitor Legislativo</h1>
+            <p style="color: #e0e0e0; margin: 0.2rem 0 0 0; font-size: 0.85rem;">
+                Monitoramento Legislativo Automatizado | {config.nome_exibicao}
+            </p>
         </div>
     </div>
     """, unsafe_allow_html=True)
