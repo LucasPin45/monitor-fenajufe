@@ -1412,26 +1412,32 @@ def verificar_autenticacao() -> bool:
 # ============================================================
 
 def render_header(config: ConfiguracaoCliente):
-    """Renderiza cabeçalho da aplicação com logo FENAJUFE"""
+    """Renderiza cabeçalho da aplicação com identidade FENAJUFE"""
     
-    # Carregar logo (com cache)
+    # Tentar carregar logo (com cache)
     logo_base64 = carregar_logo_base64()
     
-    # Construir HTML do header
+    # Se conseguiu a logo, mostrar com fundo branco
+    # Se não, mostrar texto estilizado "FENAJUFE"
     if logo_base64:
-        logo_html = f'<img src="data:image/png;base64,{logo_base64}" alt="FENAJUFE" style="height: 45px; width: auto;">'
+        logo_html = f'''
+        <div style="background: white; padding: 8px 15px; border-radius: 8px; display: flex; align-items: center;">
+            <img src="data:image/png;base64,{logo_base64}" alt="FENAJUFE" style="height: 45px; width: auto;">
+        </div>'''
     else:
-        logo_html = '<span style="font-size: 2rem;">⚖️</span>'
+        # Fallback: texto estilizado FENAJUFE (sem box branco feio)
+        logo_html = '''
+        <div style="background: white; padding: 6px 12px; border-radius: 8px; display: flex; align-items: center;">
+            <span style="font-size: 1.4rem; font-weight: bold; color: #8B0000;">FENAJUFE</span>
+        </div>'''
     
     st.markdown(f"""
     <div style="background: linear-gradient(135deg, #8B0000 0%, #1a1a2e 100%); 
                 padding: 1rem 1.5rem; border-radius: 10px; margin-bottom: 1rem;
                 display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
-        <div style="background: white; padding: 8px 15px; border-radius: 8px; min-height: 50px; display: flex; align-items: center;">
-            {logo_html}
-        </div>
+        {logo_html}
         <div style="flex: 1;">
-            <h1 style="color: white; margin: 0; font-size: 1.6rem;">Monitor Legislativo</h1>
+            <h1 style="color: white; margin: 0; font-size: 1.6rem;">⚖️ Monitor Legislativo</h1>
             <p style="color: #e0e0e0; margin: 0.2rem 0 0 0; font-size: 0.85rem;">
                 Monitoramento Legislativo Automatizado | {config.nome_exibicao}
             </p>
