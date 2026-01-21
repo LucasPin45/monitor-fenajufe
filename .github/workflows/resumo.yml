@@ -2,7 +2,8 @@ name: Resumo do dia - Monitor FENAJUFE
 
 on:
   schedule:
-    - cron: "30 23 * * 1-5" # 20:30 Brasília (UTC-3) => 23:30 UTC
+    # 20:00 Brasília = 23:00 UTC
+    - cron: "0 23 * * 1-5"  # Seg-Sex às 20:00 Brasília
   workflow_dispatch:
 
 permissions:
@@ -37,7 +38,7 @@ jobs:
 
           NOTIFICAR_EMAIL: "true"
           EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
-          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_SMTP_PORT: "587"
           EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
