@@ -14,6 +14,18 @@ regime_juridico = "Regime Jurídico Único (Lei nº 8.112/1990)"
 poder = "Judiciário Federal"
 cluster = ["Poder Judiciário", "Aposentados e Pensionistas", "Oficiais de Justiça"]
 
+# Palavras de exclusão (reduz ruído)
+exclusoes = [
+    "CLT",
+    "empregado doméstico",
+    "empregado público",
+    "iniciativa privada",
+    "Judiciário estadual",
+    "servidor privado",
+    "trabalhador rural",
+    "tribunal de justiça estadual",
+]
+
 [cliente.responsaveis]
 nomes = ["Bárbara", "Carolina", "Larissa", "Lucas"]
 
@@ -22,18 +34,13 @@ tribunais = ["TRTs", "TST", "TSE", "STJ", "STF"]
 outros = ["MPU", "MJSP", "CNJ", "CNMP"]
 
 # ============================================================
-# TEMAS DE INTERESSE - Estrutura Hierárquica
+# TEMAS DE INTERESSE (formato usado pelo monitor/alertas)
+# Cada tema: nome, palavras, peso
 # ============================================================
 
-[temas]
-
-# --- TEMA 1: SERVIDORES PÚBLICOS ---
-[temas.servidores_publicos]
-nome = "Servidores Públicos"
-descricao = "RJU, Estatutos, Remuneração, Direitos"
-prioridade = "ALTA"
-
-palavras_principais = [
+[cliente.temas.servidores_publicos]
+nome = "Servidores Públicos (RJU, remuneração e direitos)"
+palavras = [
     "servidor público",
     "servidores públicos",
     "servidor federal",
@@ -43,9 +50,6 @@ palavras_principais = [
     "Lei 8.112",
     "estatuto do servidor",
     "estatuto dos servidores",
-]
-
-palavras_remuneracao = [
     "reajuste salarial",
     "reajuste dos servidores",
     "data-base",
@@ -66,9 +70,6 @@ palavras_remuneracao = [
     "auxílio-transporte",
     "auxílio-saúde",
     "auxílio-moradia",
-]
-
-palavras_direitos = [
     "indenização",
     "indenizações",
     "licença",
@@ -84,21 +85,11 @@ palavras_direitos = [
     "cessão",
     "requisição",
 ]
+peso = 10
 
-palavras_exclusao = [
-    "servidor privado",
-    "empregado público",
-    "CLT",
-    "iniciativa privada",
-]
-
-# --- TEMA 2: PODER JUDICIÁRIO ---
-[temas.poder_judiciario]
-nome = "Poder Judiciário"
-descricao = "Organização, carreiras e funcionamento do Judiciário"
-prioridade = "ALTA"
-
-palavras_principais = [
+[cliente.temas.poder_judiciario]
+nome = "Poder Judiciário (estrutura e órgãos)"
+palavras = [
     "Poder Judiciário",
     "Judiciário Federal",
     "Justiça Federal",
@@ -109,9 +100,6 @@ palavras_principais = [
     "magistratura",
     "CNJ",
     "Conselho Nacional de Justiça",
-]
-
-palavras_tribunais = [
     "STF",
     "Supremo Tribunal Federal",
     "STJ",
@@ -126,9 +114,6 @@ palavras_tribunais = [
     "Tribunal Regional do Trabalho",
     "TRE",
     "Tribunal Regional Eleitoral",
-]
-
-palavras_organizacao = [
     "criação de cargos",
     "criação de varas",
     "criação de tribunal",
@@ -143,14 +128,11 @@ palavras_organizacao = [
     "PJe",
     "processo eletrônico",
 ]
+peso = 10
 
-# --- TEMA 3: CARREIRAS DO JUDICIÁRIO ---
-[temas.carreiras_judiciario]
-nome = "Carreiras do Judiciário"
-descricao = "Carreiras específicas dos servidores do Judiciário e MPU"
-prioridade = "ALTA"
-
-palavras_principais = [
+[cliente.temas.carreiras_judiciario]
+nome = "Carreiras do Judiciário (cargos, concurso, PCS)"
+palavras = [
     "Analista Judiciário",
     "Técnico Judiciário",
     "Auxiliar Judiciário",
@@ -160,9 +142,21 @@ palavras_principais = [
     "agente de segurança",
     "agentes de segurança dos tribunais",
     "segurança judiciária",
+    "plano de cargos e salários",
+    "PCS",
+    "plano de carreira",
+    "carreira dos servidores",
+    "reestruturação de carreira",
+    "enquadramento",
+    "transposição",
+    "cargo efetivo",
+    "concurso público",
 ]
+peso = 12
 
-palavras_mpu = [
+[cliente.temas.mpu]
+nome = "Ministério Público da União (MPU/MPF/MPT/MPM/MPDFT/CNMP)"
+palavras = [
     "servidor do Ministério Público",
     "servidores do MPU",
     "Ministério Público da União",
@@ -178,26 +172,11 @@ palavras_mpu = [
     "Conselho Nacional do Ministério Público",
     "Oficial do Ministério Público",
 ]
+peso = 10
 
-palavras_plano_carreira = [
-    "plano de cargos e salários",
-    "PCS",
-    "plano de carreira",
-    "carreira dos servidores",
-    "reestruturação de carreira",
-    "enquadramento",
-    "transposição",
-    "cargo efetivo",
-    "concurso público",
-]
-
-# --- TEMA 4: PREVIDÊNCIA DO SERVIDOR ---
-[temas.previdencia]
-nome = "Previdência do Servidor"
-descricao = "Regime Próprio, aposentadoria, pensão"
-prioridade = "ALTA"
-
-palavras_principais = [
+[cliente.temas.previdencia]
+nome = "Previdência do Servidor (RPPS, aposentadoria e pensão)"
+palavras = [
     "previdência",
     "previdência do servidor",
     "regime próprio",
@@ -211,9 +190,6 @@ palavras_principais = [
     "aposentados",
     "inativo",
     "inativos",
-]
-
-palavras_especificas = [
     "tempo de contribuição",
     "idade mínima",
     "regra de transição",
@@ -228,9 +204,6 @@ palavras_especificas = [
     "abono de permanência",
     "reversão",
     "readaptação",
-]
-
-palavras_pcd = [
     "pessoa com deficiência",
     "PcD",
     "aposentadoria da pessoa com deficiência",
@@ -238,14 +211,11 @@ palavras_pcd = [
     "LC 142",
     "Lei Complementar 142",
 ]
+peso = 10
 
-# --- TEMA 5: DIREITOS SINDICAIS ---
-[temas.sindical]
-nome = "Direitos Sindicais"
-descricao = "Organização sindical, greve, negociação coletiva"
-prioridade = "MÉDIA"
-
-palavras_principais = [
+[cliente.temas.sindical]
+nome = "Direitos Sindicais (greve e negociação coletiva)"
+palavras = [
     "sindicato",
     "sindicatos",
     "sindical",
@@ -256,27 +226,18 @@ palavras_principais = [
     "movimento sindical",
     "dirigente sindical",
     "sindicatos nacionais",
-]
-
-palavras_greve = [
     "greve",
     "direito de greve",
     "greve no serviço público",
     "paralisação",
     "movimento paredista",
     "desconto de greve",
-]
-
-palavras_negociacao = [
     "negociação coletiva",
     "negociação no serviço público",
     "mesa de negociação",
     "acordo coletivo",
     "dissídio",
     "data-base",
-]
-
-palavras_organizacao = [
     "unicidade sindical",
     "pluralidade sindical",
     "reforma sindical",
@@ -289,29 +250,24 @@ palavras_organizacao = [
     "licença classista",
     "liberação sindical",
 ]
+peso = 8
 
-# --- TEMA 6: PORTE DE ARMA ---
-[temas.porte_arma]
-nome = "Porte de Arma - Oficiais de Justiça"
-descricao = "Porte de arma para oficiais de justiça e agentes de segurança"
-prioridade = "MÉDIA"
-
-palavras_principais = [
+[cliente.temas.porte_arma]
+nome = "Porte de Arma (Oficiais de Justiça e segurança)"
+palavras = [
     "porte de arma",
     "porte funcional",
     "arma de fogo",
     "oficial de justiça",
     "agente de segurança",
     "segurança do Judiciário",
-]
-
-palavras_legislacao = [
     "Estatuto do Desarmamento",
     "Lei 10.826",
     "posse de arma",
     "aquisição de arma",
     "registro de arma",
 ]
+peso = 6
 
 # ============================================================
 # COMISSÕES ESTRATÉGICAS
@@ -319,28 +275,28 @@ palavras_legislacao = [
 
 [comissoes]
 prioritarias = [
-    "CCJC",      # Constituição e Justiça
-    "CTASP",     # Trabalho, Administração e Serviço Público
-    "CFT",       # Finanças e Tributação
-    "CSSF",      # Seguridade Social e Família
-    "CDEICS",    # Desenvolvimento Econômico
+    "CCJC",
+    "CTASP",
+    "CFT",
+    "CSSF",
+    "CDEICS",
 ]
 
 secundarias = [
-    "CDHM",      # Direitos Humanos
-    "CFFC",      # Fiscalização Financeira e Controle
-    "CLP",       # Legislação Participativa
+    "CDHM",
+    "CFFC",
+    "CLP",
 ]
 
 plenario = true
-senado = true
+monitorar_senado = true
 
 [comissoes.senado]
 prioritarias = [
-    "CCJ",       # Constituição, Justiça e Cidadania
-    "CAS",       # Assuntos Sociais
-    "CAE",       # Assuntos Econômicos
-    "CDH",       # Direitos Humanos
+    "CCJ",
+    "CAS",
+    "CAE",
+    "CDH",
 ]
 
 # ============================================================
@@ -348,57 +304,43 @@ prioritarias = [
 # ============================================================
 
 [alertas]
-# Horários
 horario_inicio = "07:00"
 horario_fim = "22:00"
 fuso_horario = "America/Sao_Paulo"
 
-# Níveis de prioridade
 [alertas.critico]
-# Votação em pauta hoje/amanhã
 telegram = true
 email = true
 sla_minutos = 5
 
 [alertas.alto]
-# Urgência aprovada, novo relator em matéria crítica
 telegram = true
 email = true
 sla_minutos = 15
 
 [alertas.medio]
-# Movimentação relevante, audiência pública
 telegram = true
 email = false
 sla_minutos = 60
 
 [alertas.baixo]
-# Nova proposição apresentada
 telegram = false
-email = true  # Via digest diário
-sla_minutos = 1440  # 24 horas
+email = true
+sla_minutos = 1440
 
-# Digest diário
 [alertas.digest]
 horario = "19:00"
 enviar_se_vazio = false
 
 # ============================================================
-# CANAIS DE COMUNICAÇÃO
+# CANAIS DE COMUNICAÇÃO (valores sensíveis via Secrets no Actions)
 # ============================================================
 
 [telegram]
-bot_token = ""  # Preencher com token do @BotFather
-chat_id = ""    # ID do grupo/canal da FENAJUFE
-# Comandos disponíveis:
-# /status - Ver status do monitoramento
-# /silenciar - Pausar alertas por 2 horas
-# /buscar [termo] - Buscar proposição
-# /agenda - Ver agenda da semana
-# /config - Ver configuração atual
+bot_token = ""
+chat_id = ""
 
 [email]
-# Listas de distribuição
 destinatarios_alertas = [
     "monitoramento@fenajufe.org.br",
     "diretoria@fenajufe.org.br",
@@ -418,27 +360,24 @@ nome_remetente = "Monitor FENAJUFE"
 [relatorios]
 
 [relatorios.agenda_semanal]
-# "Agenda Legislativa da Semana"
 gerar = true
-dia_geracao = "monday"  # Segunda-feira
+dia_geracao = "monday"
 horario_geracao = "07:00"
 formatos = ["pdf", "xlsx"]
 enviar_email = true
 enviar_telegram = true
 
 [relatorios.retrospectiva_semanal]
-# "O que aconteceu na semana"
 gerar = true
-dia_geracao = "friday"  # Sexta-feira
+dia_geracao = "friday"
 horario_geracao = "18:00"
 formatos = ["pdf", "xlsx"]
 enviar_email = true
-enviar_telegram = false  # Apenas resumo
+enviar_telegram = false
 
 [relatorios.mensal]
-# Relatório estratégico mensal
 gerar = true
-dia_geracao = 1  # Primeiro dia útil
+dia_geracao = 1
 horario_geracao = "09:00"
 formatos = ["pdf"]
 enviar_email = true
@@ -449,24 +388,23 @@ enviar_email = true
 
 [proposicoes]
 tipos_camara = [
-    "PL",      # Projeto de Lei
-    "PLP",     # Projeto de Lei Complementar
-    "PEC",     # Proposta de Emenda Constitucional
-    "MPV",     # Medida Provisória
-    "PDL",     # Projeto de Decreto Legislativo
-    "PRC",     # Projeto de Resolução da Câmara
-    "REQ",     # Requerimento (audiências, convocações)
-    "INC",     # Indicação
+    "PL",
+    "PLP",
+    "PEC",
+    "MPV",
+    "PDL",
+    "PRC",
+    "REQ",
+    "INC",
 ]
 
 tipos_senado = [
-    "PLS",     # Projeto de Lei do Senado
-    "PLC",     # Projeto de Lei da Câmara (em revisão)
-    "PRS",     # Projeto de Resolução do Senado
-    "PDS",     # Projeto de Decreto Legislativo do Senado
+    "PLS",
+    "PLC",
+    "PRS",
+    "PDS",
 ]
 
-# Filtrar por situação
 situacoes_ativas = [
     "Em Tramitação",
     "Aguardando Deliberação",
@@ -475,13 +413,11 @@ situacoes_ativas = [
 ]
 
 # ============================================================
-# PALAVRAS-CHAVE CONSOLIDADAS (para busca rápida)
+# PALAVRAS-CHAVE CONSOLIDADAS (busca rápida)
 # ============================================================
 
 [palavras_chave]
-# Lista consolidada de todas as palavras-chave principais
 principais = [
-    # Servidores
     "servidor público",
     "servidores públicos",
     "servidor federal",
@@ -490,30 +426,22 @@ principais = [
     "reajuste salarial",
     "data-base",
     "revisão geral anual",
-    
-    # Judiciário
     "Poder Judiciário",
     "Judiciário Federal",
     "servidor do Judiciário",
     "servidores do Judiciário",
     "CNJ",
-    
-    # Carreiras
     "Analista Judiciário",
     "Técnico Judiciário",
     "Oficial de Justiça",
     "Oficiais de Justiça",
     "agente de segurança",
     "plano de carreira",
-    
-    # MPU
     "Ministério Público da União",
     "MPU",
     "MPF",
     "servidor do Ministério Público",
     "CNMP",
-    
-    # Previdência
     "aposentadoria",
     "aposentadoria especial",
     "previdência do servidor",
@@ -521,27 +449,22 @@ principais = [
     "pensão",
     "Funpresp",
     "pessoa com deficiência",
-    
-    # Sindical
     "greve no serviço público",
     "direito de greve",
     "negociação coletiva",
     "sindicato",
     "contribuição sindical",
-    
-    # Porte de arma
     "porte de arma",
     "oficial de justiça",
 ]
 
-# Palavras que EXCLUEM a proposição (redução de ruído)
 exclusao = [
     "servidor privado",
     "iniciativa privada",
     "CLT",
     "empregado doméstico",
     "trabalhador rural",
-    "Judiciário estadual",  # Foco é federal
+    "Judiciário estadual",
     "tribunal de justiça estadual",
 ]
 
@@ -550,10 +473,8 @@ exclusao = [
 # ============================================================
 
 [avancado]
-# Score mínimo para considerar match (0-100)
 score_minimo = 30
 
-# Peso das palavras por categoria
 [avancado.pesos]
 palavra_principal = 10
 palavra_secundaria = 5
@@ -562,20 +483,18 @@ tipo_proposicao_prioritario = 10
 urgencia = 20
 em_pauta = 25
 
-# Cache
 [avancado.cache]
 tempo_cache_api_minutos = 5
 tempo_cache_relatorios_horas = 24
 
-# Logs
 [avancado.logs]
-nivel = "INFO"  # DEBUG, INFO, WARNING, ERROR
+nivel = "INFO"
 arquivo = "logs/fenajufe.log"
 rotacao = "daily"
-retencao_dias = 30
+retencao_dias = "30"
 
 # ============================================================
-# AUTENTICAÇÃO (para painel web)
+# AUTENTICAÇÃO (painel web)
 # ============================================================
 
 [auth]
