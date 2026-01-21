@@ -33,7 +33,9 @@ import requests
 # =========================
 TZ_BRASILIA = ZoneInfo("America/Sao_Paulo")
 API_CAMARA_BASE = "https://dadosabertos.camara.leg.br/api/v2"
-HEADERS = {"User-Agent": "MonitorInteresses-FENAJUFE/2.0"}
+API_SENADO_BASE = "https://legis.senado.leg.br/dadosabertos"
+HEADERS = {"User-Agent": "MonitorInteresses-FENAJUFE/3.0"}
+SENADO_HEADERS = {"Accept": "application/json", "User-Agent": "MonitorInteresses-FENAJUFE/3.0"}
 
 # =========================
 # LINKS / CANAIS
@@ -198,10 +200,120 @@ def buscar_proposicoes_periodo(data_inicio: str, data_fim: str, tipos: List[str]
             r = requests.get(f"{API_CAMARA_BASE}/proposicoes", params=params, headers=HEADERS, timeout=30)
             if r.status_code == 200:
                 data = r.json()
-                todas.extend(data.get("dados", [])[:LIMITE_POR_TIPO])
+                props = data.get("dados", [])[:LIMITE_POR_TIPO]
+                for p in props:
+                    p["casa"] = "CAMARA"
+                todas.extend(props)
         except:
             pass
         time.sleep(0.15)
+    return todas
+
+# =========================
+# SENADO: BUSCA MATÉRIAS
+# =========================
+TIPOS_SENADO = ["PLS", "PEC", "MPV", "PLC"]
+
+def buscar_materias_senado_periodo(data_inicio: str, data_fim: str, tipos: List[str] = None) -> List[Dict[str, Any]]:
+    """Busca matérias do Senado e normaliza para formato compatível com Câmara"""
+    if tipos is None:
+        tipos = TIPOS_SENADO
+    
+    materias = []
+    
+    try:
+        dt_inicio = datetime.strptime(data_inicio, "%Y-%m-%d")
+        dt_fim = datetime.strptime(data_fim, "%Y-%m-%d")
+    except:
+        return materias
+    
+    for ano in range(dt_inicio.year, dt_fim.year + 1):
+        for tipo in tipos:
+            try:
+                url = f"{API_SENADO_BASE}/materia/pesquisa/lista"
+                params = {"sigla": tipo, "ano": ano, "tramitando": "S"}
+                
+                r = requests.get(url, params=params, headers=SENADO_HEADERS, timeout=30)
+                
+                if r.status_code == 200:
+                    data = r.json()
+                    pesquisa = data.get("PesquisaBasica", {})
+                    mats = pesquisa.get("Materias", {})
+                    
+                    if mats:
+                        lista = mats.get("Materia", [])
+                        if isinstance(lista, dict):
+                            lista = [lista]
+                        
+                        for mat in lista[:LIMITE_POR_TIPO]:
+                            # Verificar data
+                            data_apres = mat.get("DataApresentacao", "")
+                            if data_apres:
+                                try:
+                                    dt = datetime.strptime(data_apres, "%Y-%m-%d")
+                                    if dt.date() < dt_inicio.date() or dt.date() > dt_fim.date():
+                                        continue
+                                except:
+                                    pass
+                            
+                            # Normalizar
+                            norm = normalizar_materia_senado(mat)
+                            if norm:
+                                materias.append(norm)
+                
+            except:
+                pass
+            time.sleep(0.2)
+    
+    return materias[:LIMITE_POR_TIPO]
+
+def normalizar_materia_senado(mat: Dict) -> Optional[Dict]:
+    """Normaliza matéria do Senado para formato compatível com Câmara"""
+    try:
+        codigo = mat.get("Codigo", "") or mat.get("CodigoMateria", "")
+        sigla = mat.get("Sigla", "") or mat.get("SiglaSubtipoMateria", "")
+        numero = mat.get("Numero", "") or mat.get("NumeroMateria", "")
+        ano = mat.get("Ano", "") or mat.get("AnoMateria", "")
+        ementa = mat.get("Ementa", "") or mat.get("EmentaMateria", "")
+        
+        situacao_info = mat.get("SituacaoAtual", {})
+        if isinstance(situacao_info, dict):
+            situacao = situacao_info.get("Descricao", "Em tramitação")
+            local = situacao_info.get("Local", "")
+        else:
+            situacao = "Em tramitação"
+            local = ""
+        
+        return {
+            "id": f"SF-{codigo}",
+            "siglaTipo": sigla,
+            "numero": numero,
+            "ano": ano,
+            "ementa": ementa,
+            "dataApresentacao": mat.get("DataApresentacao", ""),
+            "keywords": mat.get("IndexacaoMateria", ""),
+            "casa": "SENADO",
+            "statusProposicao": {
+                "descricaoSituacao": situacao,
+                "siglaOrgao": local,
+                "dataHora": mat.get("DataUltimaAtualizacao", "")
+            }
+        }
+    except:
+        return None
+
+def buscar_proposicoes_ambas_casas(data_inicio: str, data_fim: str, tipos_camara: List[str]) -> List[Dict[str, Any]]:
+    """Busca proposições da Câmara e Senado"""
+    todas = []
+    
+    # Câmara
+    props_camara = buscar_proposicoes_periodo(data_inicio, data_fim, tipos_camara)
+    todas.extend(props_camara)
+    
+    # Senado
+    props_senado = buscar_materias_senado_periodo(data_inicio, data_fim)
+    todas.extend(props_senado)
+    
     return todas
 
 def fetch_proposicao_detalhes(proposicao_id: str) -> Dict[str, Any]:
@@ -323,7 +435,7 @@ def emoji_nivel(nivel: str) -> str:
     return {"CRITICO": "🚨", "ALTO": "⚠️", "MEDIO": "🔔", "BAIXO": "📋"}.get(nivel, "ℹ️")
 
 def formatar_alerta_match(match: Dict[str, Any], prop: Dict[str, Any], status: Dict[str, str]) -> str:
-    """Formato estilo Monitor Parlamentar Informa"""
+    """Formato estilo Monitor Parlamentar Informa - suporta Câmara e Senado"""
     ident = format_sigla_num_ano(prop.get("siglaTipo", ""), prop.get("numero", ""), prop.get("ano", ""))
     ementa = trunc(prop.get("ementa", ""), 350)
     orgao = status.get("siglaOrgao") or safe_get(prop, ["statusProposicao", "siglaOrgao"], "")
@@ -337,10 +449,22 @@ def formatar_alerta_match(match: Dict[str, Any], prop: Dict[str, Any], status: D
     temas_txt = ", ".join(match["temas_match"]) if match["temas_match"] else "Geral"
     palavras_txt = ", ".join(match["palavras_match"][:5]) if match["palavras_match"] else "-"
 
-    link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={match['proposicao_id']}"
+    # Identificar casa e gerar link correto
+    casa = prop.get("casa", "CAMARA")
+    pid = str(match['proposicao_id'])
+    if pid.startswith("SF-"):
+        casa = "SENADO"
+    
+    if casa == "SENADO":
+        casa_label = "SF"
+        codigo_senado = pid.replace("SF-", "")
+        link = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_senado}"
+    else:
+        casa_label = "CD"
+        link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={pid}"
 
     # Formato inspirado no Monitor Parlamentar
-    msg = f"""<b>🎯 Monitor FENAJUFE Informa</b> | CD | <b>{html.escape(ident)}</b>
+    msg = f"""<b>🎯 Monitor FENAJUFE Informa</b> | {casa_label} | <b>{html.escape(ident)}</b>
 <i>{html.escape(ementa)}</i>
 
 <b>📌 Status:</b> {html.escape(situacao)}
@@ -623,8 +747,13 @@ def executar_varredura():
     print(f"📅 Período: {data_inicio} → {data_fim}")
     print(f"📊 Score mínimo: {SCORE_MINIMO}")
     
-    props = buscar_proposicoes_periodo(data_inicio, data_fim, TIPOS_MONITORADOS)
-    print(f"📦 Proposições coletadas: {len(props)}")
+    # Buscar de AMBAS AS CASAS
+    props = buscar_proposicoes_ambas_casas(data_inicio, data_fim, TIPOS_MONITORADOS)
+    
+    # Contar por casa
+    props_camara = len([p for p in props if p.get("casa") == "CAMARA"])
+    props_senado = len([p for p in props if p.get("casa") == "SENADO"])
+    print(f"📦 Proposições coletadas: {len(props)} (CD: {props_camara} | SF: {props_senado})")
 
     novos_alertas = 0
     descartados_score = 0
@@ -634,9 +763,12 @@ def executar_varredura():
         if not pid:
             continue
 
-        det = fetch_proposicao_detalhes(pid)
-        if det:
-            p = det
+        # Só buscar detalhes para proposições da Câmara (Senado já vem normalizado)
+        if p.get("casa") == "CAMARA" and not str(pid).startswith("SF-"):
+            det = fetch_proposicao_detalhes(pid)
+            if det:
+                det["casa"] = "CAMARA"
+                p = det
 
         match = calcular_match(p, cfg)
         if not match:

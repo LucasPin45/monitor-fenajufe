@@ -433,6 +433,154 @@ class MatchingEngine:
 # FUNÇÕES DE COLETA DE DADOS
 # ============================================================
 
+# ----- SENADO FEDERAL -----
+
+SENADO_HEADERS = {
+    "Accept": "application/json",
+    "User-Agent": "MonitorFENAJUFE/1.0"
+}
+
+TIPOS_SENADO = ["PLS", "PLC", "PEC", "MPV", "PDS", "PDL", "PRS"]  # Tipos do Senado
+
+@lru_cache(maxsize=500)
+def fetch_materia_senado_detalhes(codigo: str) -> Dict:
+    """Busca detalhes de uma matéria do Senado (com cache)"""
+    try:
+        url = f"{API_SENADO_BASE}/materia/{codigo}"
+        response = requests.get(url, headers=SENADO_HEADERS, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            materia = data.get("DetalheMateria", {}).get("Materia", {})
+            return materia
+    except Exception as e:
+        pass
+    return {}
+
+def buscar_materias_senado_periodo(
+    data_inicio: datetime.date,
+    data_fim: datetime.date,
+    tipos: List[str] = None,
+    limite: int = 50
+) -> List[Dict]:
+    """
+    Busca matérias do Senado apresentadas em um período.
+    Retorna lista normalizada (mesmo formato da Câmara).
+    """
+    if tipos is None:
+        tipos = TIPOS_SENADO
+    
+    materias_normalizadas = []
+    ano_inicio = data_inicio.year
+    ano_fim = data_fim.year
+    
+    for ano in range(ano_inicio, ano_fim + 1):
+        for tipo in tipos:
+            try:
+                # API do Senado: pesquisa por ano e tipo
+                url = f"{API_SENADO_BASE}/materia/pesquisa/lista"
+                params = {
+                    "sigla": tipo,
+                    "ano": ano,
+                    "tramitando": "S"  # Apenas em tramitação
+                }
+                
+                response = requests.get(url, params=params, headers=SENADO_HEADERS, timeout=30)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    # Navegar na estrutura da resposta do Senado
+                    pesquisa = data.get("PesquisaBasica", {})
+                    materias = pesquisa.get("Materias", {})
+                    
+                    if materias:
+                        lista_materias = materias.get("Materia", [])
+                        # Se vier um único item, transformar em lista
+                        if isinstance(lista_materias, dict):
+                            lista_materias = [lista_materias]
+                        
+                        for mat in lista_materias[:limite]:
+                            # Verificar data de apresentação
+                            data_apres = mat.get("DataApresentacao", "")
+                            if data_apres:
+                                try:
+                                    dt = datetime.datetime.strptime(data_apres, "%Y-%m-%d").date()
+                                    if dt < data_inicio or dt > data_fim:
+                                        continue
+                                except:
+                                    pass
+                            
+                            # Normalizar para formato similar à Câmara
+                            materia_norm = normalizar_materia_senado(mat)
+                            if materia_norm:
+                                materias_normalizadas.append(materia_norm)
+                
+            except Exception as e:
+                pass  # Silenciar erros para não travar a interface
+            
+            time.sleep(0.2)  # Rate limiting
+    
+    return materias_normalizadas[:limite]
+
+def normalizar_materia_senado(materia: Dict) -> Dict:
+    """
+    Normaliza matéria do Senado para formato compatível com Câmara.
+    Permite usar as mesmas funções de matching.
+    """
+    try:
+        codigo = materia.get("Codigo", "") or materia.get("CodigoMateria", "")
+        sigla = materia.get("Sigla", "") or materia.get("SiglaSubtipoMateria", "")
+        numero = materia.get("Numero", "") or materia.get("NumeroMateria", "")
+        ano = materia.get("Ano", "") or materia.get("AnoMateria", "")
+        ementa = materia.get("Ementa", "") or materia.get("EmentaMateria", "")
+        
+        # Situação
+        situacao_info = materia.get("SituacaoAtual", {})
+        if isinstance(situacao_info, dict):
+            situacao = situacao_info.get("Descricao", "Em tramitação")
+            local = situacao_info.get("Local", "")
+        else:
+            situacao = "Em tramitação"
+            local = ""
+        
+        return {
+            "id": f"SF-{codigo}",  # Prefixo SF para identificar Senado
+            "siglaTipo": sigla,
+            "numero": numero,
+            "ano": ano,
+            "ementa": ementa,
+            "dataApresentacao": materia.get("DataApresentacao", ""),
+            "keywords": materia.get("IndexacaoMateria", ""),
+            "uri": f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo}",
+            "casa": "SENADO",
+            "statusProposicao": {
+                "descricaoSituacao": situacao,
+                "siglaOrgao": local,
+                "dataHora": materia.get("DataUltimaAtualizacao", "")
+            }
+        }
+    except Exception:
+        return None
+
+def buscar_tramitacoes_senado(codigo: str) -> List[Dict]:
+    """Busca tramitações de uma matéria do Senado"""
+    try:
+        url = f"{API_SENADO_BASE}/materia/movimentacoes/{codigo}"
+        response = requests.get(url, headers=SENADO_HEADERS, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            movs = data.get("MovimentacaoMateria", {}).get("Materia", {}).get("Movimentacoes", {})
+            if movs:
+                lista = movs.get("Movimentacao", [])
+                if isinstance(lista, dict):
+                    lista = [lista]
+                return lista
+    except:
+        pass
+    return []
+
+# ----- CÂMARA DOS DEPUTADOS -----
+
 @lru_cache(maxsize=1000)
 def fetch_proposicao_detalhes(proposicao_id: str) -> Dict:
     """Busca detalhes completos de uma proposição (com cache)"""
@@ -496,12 +644,56 @@ def buscar_proposicoes_periodo(
             if response.status_code == 200:
                 data = response.json()
                 proposicoes = data.get("dados", [])
+                # Adicionar identificador da casa
+                for prop in proposicoes[:limite_por_tipo]:
+                    prop["casa"] = "CAMARA"
                 todas_proposicoes.extend(proposicoes[:limite_por_tipo])
                         
         except Exception as e:
             st.warning(f"Erro ao buscar {tipo}: {e}")
     
     return todas_proposicoes
+
+def buscar_proposicoes_ambas_casas(
+    data_inicio: datetime.date,
+    data_fim: datetime.date,
+    tipos_camara: List[str] = None,
+    tipos_senado: List[str] = None,
+    incluir_senado: bool = True,
+    limite_por_tipo: int = 50
+) -> List[Dict]:
+    """
+    Busca proposições de ambas as casas (Câmara e Senado).
+    Retorna lista unificada e normalizada.
+    """
+    todas = []
+    
+    # Buscar da Câmara
+    if tipos_camara is None:
+        tipos_camara = ["PL", "PLP", "PEC", "MPV", "PDL"]
+    
+    props_camara = buscar_proposicoes_periodo(
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+        tipos=tipos_camara,
+        limite_por_tipo=limite_por_tipo
+    )
+    todas.extend(props_camara)
+    
+    # Buscar do Senado
+    if incluir_senado:
+        if tipos_senado is None:
+            tipos_senado = ["PLS", "PEC", "MPV", "PLC"]  # Principais tipos do Senado
+        
+        props_senado = buscar_materias_senado_periodo(
+            data_inicio=data_inicio,
+            data_fim=data_fim,
+            tipos=tipos_senado,
+            limite=limite_por_tipo
+        )
+        todas.extend(props_senado)
+    
+    return todas
 
 def buscar_eventos_periodo(
     data_inicio: datetime.date,
@@ -593,8 +785,14 @@ def buscar_pauta_evento(evento_id: str) -> List[Dict]:
 
 @lru_cache(maxsize=500)
 def fetch_status_proposicao(proposicao_id: str) -> Dict:
-    """Busca status atualizado de uma proposição (com cache)"""
+    """Busca status atualizado de uma proposição (com cache) - Câmara ou Senado"""
     try:
+        # Verificar se é do Senado
+        if str(proposicao_id).startswith("SF-"):
+            codigo_senado = str(proposicao_id).replace("SF-", "")
+            return fetch_status_materia_senado(codigo_senado)
+        
+        # Câmara
         url = f"{API_CAMARA_BASE}/proposicoes/{proposicao_id}"
         response = requests.get(url, timeout=15)
         if response.status_code == 200:
@@ -609,6 +807,29 @@ def fetch_status_proposicao(proposicao_id: str) -> Dict:
                 "relator": status.get("nomeRelator", "") if status.get("nomeRelator") else "",
                 "uriRelator": status.get("uriRelator", ""),
             }
+    except Exception:
+        pass
+    return {}
+
+def fetch_status_materia_senado(codigo: str) -> Dict:
+    """Busca status de uma matéria do Senado"""
+    try:
+        url = f"{API_SENADO_BASE}/materia/{codigo}"
+        response = requests.get(url, headers=SENADO_HEADERS, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            materia = data.get("DetalheMateria", {}).get("Materia", {})
+            situacao = materia.get("SituacaoAtual", {})
+            
+            if isinstance(situacao, dict):
+                return {
+                    "situacao": situacao.get("Descricao", ""),
+                    "siglaOrgao": situacao.get("Local", ""),
+                    "dataHora": materia.get("DataUltimaAtualizacao", ""),
+                    "despacho": "",
+                    "regime": "",
+                    "relator": materia.get("Relator", "") if materia.get("Relator") else "",
+                }
     except Exception:
         pass
     return {}
@@ -727,8 +948,21 @@ def criar_dataframe_matches(matches: List[Match], proposicoes: Dict[str, Dict], 
         # Emoji de alerta baseado nos dias
         alerta_emoji = get_alerta_emoji_dias(dias_parado)
         
+        # Identificar a casa (Senado ou Câmara)
+        casa = prop.get("casa", "CAMARA")
+        if str(match.proposicao_id).startswith("SF-"):
+            casa = "SENADO"
+        
+        # Gerar link correto baseado na casa
+        if casa == "SENADO":
+            codigo_senado = str(match.proposicao_id).replace("SF-", "")
+            link = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_senado}"
+        else:
+            link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={match.proposicao_id}"
+        
         registro = {
             "ID": match.proposicao_id,
+            "Casa": "SF" if casa == "SENADO" else "CD",
             "Alerta": alerta_emoji,
             "Proposição": format_sigla_num_ano(
                 prop.get("siglaTipo", ""),
@@ -749,7 +983,7 @@ def criar_dataframe_matches(matches: List[Match], proposicoes: Dict[str, Dict], 
             "Palavras Match": ", ".join(match.palavras_match[:5]),
             "Score": match.score_relevancia,
             "Nível Alerta": match.nivel_alerta.name,
-            "Link": f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={match.proposicao_id}"
+            "Link": link
         }
         
         registros.append(registro)
@@ -814,6 +1048,13 @@ class SistemaAlertas:
             proposicao.get("ano", "")
         )
         
+        # Identificar casa
+        casa = proposicao.get("casa", "CAMARA")
+        if str(match.proposicao_id).startswith("SF-"):
+            casa = "SENADO"
+        
+        casa_label = "SF" if casa == "SENADO" else "CD"
+        
         # Status
         status = proposicao.get("statusProposicao", {})
         situacao = status.get("descricaoSituacao", "Em tramitação")
@@ -824,8 +1065,15 @@ class SistemaAlertas:
         if len(ementa) > 200:
             ementa = ementa[:200] + "..."
         
+        # Link correto baseado na casa
+        if casa == "SENADO":
+            codigo_senado = str(match.proposicao_id).replace("SF-", "")
+            link = f"https://www25.senado.leg.br/web/atividade/materias/-/materia/{codigo_senado}"
+        else:
+            link = f"https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={match.proposicao_id}"
+        
         # Montar mensagem
-        mensagem = f"""{emoji} <b>{nivel_texto}</b>
+        mensagem = f"""{emoji} <b>{nivel_texto}</b> | {casa_label}
 
 <b>{identificacao}</b>
 <i>{ementa}</i>
@@ -835,7 +1083,7 @@ class SistemaAlertas:
 <b>Temas:</b> {', '.join(match.temas_match) if match.temas_match else 'Palavra-chave'}
 <b>Relevância:</b> {match.score_relevancia:.0f}/100
 
-🔗 <a href="https://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao={match.proposicao_id}">Ver detalhes</a>
+🔗 <a href="{link}">Ver detalhes</a>
 """
         return mensagem
     
@@ -1599,15 +1847,21 @@ def main():
         
         # Carregar dados automaticamente ou quando clicar no botão
         if btn_carregar or 'df_matches' not in st.session_state:
-            with st.spinner("Carregando proposições..."):
-                proposicoes = buscar_proposicoes_periodo(
-                    filtros["data_inicio"],
-                    filtros["data_fim"],
-                    filtros["tipos"]
+            with st.spinner("Carregando proposições da Câmara e Senado..."):
+                proposicoes = buscar_proposicoes_ambas_casas(
+                    data_inicio=filtros["data_inicio"],
+                    data_fim=filtros["data_fim"],
+                    tipos_camara=filtros["tipos"],
+                    tipos_senado=["PLS", "PEC", "MPV", "PLC"],  # Tipos equivalentes no Senado
+                    incluir_senado=True,
+                    limite_por_tipo=50
                 )
                 
                 if proposicoes:
-                    st.caption(f"📋 {len(proposicoes)} proposições encontradas no período")
+                    # Contar por casa
+                    props_camara = len([p for p in proposicoes if p.get("casa") == "CAMARA"])
+                    props_senado = len([p for p in proposicoes if p.get("casa") == "SENADO"])
+                    st.caption(f"📋 {len(proposicoes)} proposições encontradas (CD: {props_camara} | SF: {props_senado})")
                     
                     # Processar matches
                     with st.spinner("Aplicando filtros de interesse..."):
@@ -1986,7 +2240,7 @@ def main():
 
     # Footer
     st.markdown("---")
-    st.caption("Monitor de Interesses | Desenvolvido para monitoramento legislativo corporativo | Dados: API Dados Abertos da Câmara dos Deputados")
+    st.caption("Monitor de Interesses | Desenvolvido para monitoramento legislativo corporativo | Dados: API Dados Abertos da Câmara dos Deputados e Senado Federal")
 
 if __name__ == "__main__":
     main()
