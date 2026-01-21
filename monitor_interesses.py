@@ -1369,26 +1369,16 @@ def verificar_autenticacao() -> bool:
         st.session_state["usuario"] = "visitante"
         return True
     
-    # Carregar logo (com cache)
-    logo_base64 = carregar_logo_base64()
-    
-    if logo_base64:
-        logo_html = f'<img src="data:image/png;base64,{logo_base64}" alt="FENAJUFE" style="max-width: 200px; margin-bottom: 1rem;">'
-    else:
-        logo_html = ''
-    
     # Mostrar tela de login com identidade FENAJUFE
-    st.markdown(f"""
-    <div style="max-width: 420px; margin: 80px auto; padding: 2rem; 
-                background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                border-top: 4px solid #8B0000;">
+    login_html = '''<div style="max-width: 420px; margin: 80px auto; padding: 2rem; background: white; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-top: 4px solid #8B0000;">
         <div style="text-align: center; margin-bottom: 1.5rem;">
-            {logo_html}
+            <div style="font-size: 1.5rem; font-weight: bold; color: #8B0000; margin-bottom: 0.5rem;">FENAJUFE</div>
             <h2 style="color: #8B0000; margin: 0;">⚖️ Monitor Legislativo</h2>
-            <p style="color: #666; margin-top: 0.5rem;">FENAJUFE - Faça login para acessar</p>
+            <p style="color: #666; margin-top: 0.5rem;">Faça login para acessar</p>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>'''
+    
+    st.markdown(login_html, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
@@ -1414,36 +1404,18 @@ def verificar_autenticacao() -> bool:
 def render_header(config: ConfiguracaoCliente):
     """Renderiza cabeçalho da aplicação com identidade FENAJUFE"""
     
-    # Tentar carregar logo (com cache)
-    logo_base64 = carregar_logo_base64()
-    
-    # Se conseguiu a logo, mostrar com fundo branco
-    # Se não, mostrar texto estilizado "FENAJUFE"
-    if logo_base64:
-        logo_html = f'''
-        <div style="background: white; padding: 8px 15px; border-radius: 8px; display: flex; align-items: center;">
-            <img src="data:image/png;base64,{logo_base64}" alt="FENAJUFE" style="height: 45px; width: auto;">
-        </div>'''
-    else:
-        # Fallback: texto estilizado FENAJUFE (sem box branco feio)
-        logo_html = '''
-        <div style="background: white; padding: 6px 12px; border-radius: 8px; display: flex; align-items: center;">
-            <span style="font-size: 1.4rem; font-weight: bold; color: #8B0000;">FENAJUFE</span>
-        </div>'''
-    
-    st.markdown(f"""
-    <div style="background: linear-gradient(135deg, #8B0000 0%, #1a1a2e 100%); 
-                padding: 1rem 1.5rem; border-radius: 10px; margin-bottom: 1rem;
-                display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
-        {logo_html}
-        <div style="flex: 1;">
-            <h1 style="color: white; margin: 0; font-size: 1.6rem;">⚖️ Monitor Legislativo</h1>
-            <p style="color: #e0e0e0; margin: 0.2rem 0 0 0; font-size: 0.85rem;">
-                Monitoramento Legislativo Automatizado | {config.nome_exibicao}
-            </p>
+    # Header simples e robusto
+    header_html = f'''<div style="background: linear-gradient(135deg, #8B0000 0%, #1a1a2e 100%); padding: 1rem 1.5rem; border-radius: 10px; margin-bottom: 1rem; display: flex; align-items: center; gap: 20px;">
+        <div style="background: white; padding: 8px 15px; border-radius: 8px;">
+            <span style="font-size: 1.3rem; font-weight: bold; color: #8B0000;">FENAJUFE</span>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        <div>
+            <h1 style="color: white; margin: 0; font-size: 1.6rem;">⚖️ Monitor Legislativo</h1>
+            <p style="color: #e0e0e0; margin: 0.2rem 0 0 0; font-size: 0.85rem;">Monitoramento Legislativo Automatizado | {config.nome_exibicao}</p>
+        </div>
+    </div>'''
+    
+    st.markdown(header_html, unsafe_allow_html=True)
 
 def render_metricas_resumo(df: pd.DataFrame):
     """Renderiza cards de métricas resumo"""
