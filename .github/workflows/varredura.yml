@@ -1,0 +1,58 @@
+name: Varredura - Monitor FENAJUFE
+
+on:
+  schedule:
+    - cron: "*/20 10-23 * * 1-5" # a cada 20 min, 07:00-20:59 Brasília (UTC-3)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  varredura:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run (varredura)
+        env:
+          MODO_EXECUCAO: varredura
+          CONFIG_TOML_PATH: config_fenajufe.toml
+          LINK_PAINEL: ${{ secrets.LINK_PAINEL }}
+
+          DIAS_BUSCA: "7"
+          TIPOS_MONITORADOS: "PL,PLP,PEC,MPV,PDL"
+          LIMITE_POR_TIPO: "50"
+
+          NOTIFICAR_TELEGRAM: "true"
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          NOTIFICAR_EMAIL: "true"
+          EMAIL_SMTP_SERVER: ${{ secrets.EMAIL_SMTP_SERVER }}
+          EMAIL_SMTP_PORT: ${{ secrets.EMAIL_SMTP_PORT }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+        run: |
+          python notificar_fenajufe_interesses.py
+
+      # salva estado/histórico/resumo do dia no repo (dedupe e alternância de "sem novidades")
+      - name: Commit state files (if changed)
+        run: |
+          git config user.name "monitor-fenajufe-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add -A estado_fenajufe.json historico_fenajufe.json resumo_dia_fenajufe.json || true
+          git diff --cached --quiet || git commit -m "chore: atualizar estado do monitor (auto)"
+          git push || true
